@@ -13,6 +13,7 @@ Este projeto automatiza a extração de dados do sistema **CAD (Java)** e proces
 2. Ative o ambiente: `.\.venv\Scripts\Activate.ps1`
 3. Instale as dependências: `pip install streamlit pandas`
 4. Execute o dashboard: `streamlit run src/interface/app.py`
+5. Botão "Iniciar Extração": apenas visual por enquanto, sem funcionalidade
 
 ## 📁 Fluxo de Dados (Medalhão)
 * **01_Bronze**: Dados brutos extraídos do CAD. Organizados em subpastas por ano (ex: `2018/`, `2019/`). Codificação original: `latin1` com separador `;`.

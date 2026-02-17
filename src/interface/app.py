@@ -1,42 +1,63 @@
-import streamlit as st
-import pandas as pd
-import time
-import sys
 import os
+import sys
+import time
+from pathlib import Path
 
-# Adjust so Python finds the 'processing' folder
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import pandas as pd
+import streamlit as st
+
+# --- PATH CONFIGURATION ---
+current_dir = Path(__file__).resolve().parent
+src_root = current_dir.parent
+if str(src_root) not in sys.path:
+    sys.path.append(str(src_root))
+
+# Importamos a CLASSE agora, seguindo a boa prática de encapsulamento
+from bot.cad_bot import CADAutomationBot
 from processing.data_handler import DataProcessor
 
-# Page configuration
-st.set_page_config(
-    page_title="Bombeiros - 2ª CIA Passos",
-    page_icon="🚒",
-    layout="wide",
-)
+# --- UI CONSTANTS ---
+FIRE_DEPT_RED = "#d32f2f"
 
-# Custom CSS for Fire Department branding
-st.markdown("""
-    <style>
-    .stButton>button { width: 100%; background-color: #d32f2f; color: white; border-radius: 5px; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
+def apply_custom_styles():
+    """Applies Fire Department branding via CSS."""
+    st.markdown(f"""
+        <style>
+        .stButton>button {{ 
+            width: 100%; 
+            background-color: {FIRE_DEPT_RED}; 
+            color: white; 
+            border-radius: 5px; 
+        }}
+        .stTabs [data-baseweb="tab-list"] {{ gap: 24px; }}
+        .stTabs [data-baseweb="tab"] {{ 
+            height: 50px; 
+            white-space: pre-wrap; 
+            font-weight: bold; 
+        }}
+        </style>
+        """, unsafe_allow_html=True)
 
 def main():
-    # Initialize Data Processor
+    # Initialization
+    st.set_page_config(
+        page_title="Bombeiros - 2ª CIA Passos",
+        page_icon="🚒",
+        layout="wide",
+    )
+    apply_custom_styles()
+    
+    # Instanciamos os objetos necessários
     processor = DataProcessor()
+    bot = CADAutomationBot()
 
-    # Header
+    # Sidebar & Header
     st.title("🚒 Gestão de Ocorrências - 2ª CIA Passos")
-    st.divider()
-
-    # Sidebar
     st.sidebar.header("📍 Localidade")
     st.sidebar.info("Unidade: 2ª CIA - PASSOS")
-    
-    # Navigation Tabs (Variable names in English, Labels in Portuguese)
+    st.divider()
+
+    # Tabs definition
     extraction_tab, processing_tab, dashboard_tab = st.tabs([
         "📥 Extração (CAD)", 
         "⚙️ Processamento (Medalhão)", 
@@ -45,70 +66,67 @@ def main():
 
     # --- TAB 1: EXTRACTION ---
     with extraction_tab:
-        st.subheader("Extração de Dados do Sistema CAD")
-        st.write("Acione o script para realizar o download automático do CSV no sistema JAVA.")
-        
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if st.button("Iniciar Extração"):
-                with st.status("Executando automação...", expanded=True) as status:
-                    st.write("Acessando sistema CAD...")
-                    time.sleep(1.5)
-                    st.write("Baixando dados brutos...")
-                    time.sleep(1.0)
-                    status.update(label="Download concluído!", state="complete")
-                st.success("Arquivo CSV disponível na pasta '01_bronze'.")
+        st.subheader("Extração Automatizada")
+        if st.button("Iniciar Extração"):
+            with st.status("Preparando ambiente...", expanded=True) as status:
+                # Ação 1: Fechar Excel
+                st.write("Encerrando processos do Excel...")
+                count = bot.close_excel_processes()
+                msg = f"Encerradas {count} instâncias." if count > 0 else "Nenhuma instância aberta."
+                st.write(msg)
+                
+                # Ação 2: Focar Janela do CAD
+                st.write("Localizando janela do sistema CAD...")
+                time.sleep(1)
+                
+                if bot.focus_cad_window():
+                    st.write("✅ Janela do CAD localizada e focada.")
+                    status.update(label="Ambiente Pronto!", state="complete")
+                    st.success("O sistema está pronto. Proceda com a extração manual ou automática no CAD.")
+                else:
+                    status.update(label="Erro na Localização", state="error")
+                    st.error("Certifique-se de que o CAD está aberto com o título correto.")
 
     # --- TAB 2: PROCESSING ---
     with processing_tab:
-        st.subheader("Pipeline de Dados (Arquitetura Medalhão)")
-        st.info("Este módulo transforma os dados brutos (2018-2026) em tabelas prontas para análise.")
+        st.subheader("Pipeline de Dados")
         
-        metric_col1, metric_col2, metric_col3 = st.columns(3)
-        metric_col1.metric("Camada Bronze", "Dados Brutos")
-        metric_col2.metric("Camada Prata", "Dados Limpos")
-        metric_col3.metric("Camada Ouro", "Dados Consolidados")
-
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("Bronze", "Dados Brutos")
+        m_col2.metric("Silver", "Dados Limpos")
+        m_col3.metric("Gold", "Consolidados")
         st.divider()
 
-        # Action 1: Consolidate Historical Data (The folders 2018, 2019...)
-        st.write("### 📂 Processamento Histórico")
+        st.write("### 📂 Consolidação Histórica")
         if st.button("Unificar Histórico (2018 - 2026)"):
             try:
-                with st.spinner("Lendo subpastas e consolidando arquivos..."):
+                with st.spinner("Processando pastas..."):
                     df_master = processor.consolidate_historical_data()
-                st.success(f"Sucesso! {len(df_master)} registros unificados em 'master_historic_silver.csv'.")
-                st.dataframe(df_master.head(20), width="stretch")
+                st.success(f"Unificação concluída: {len(df_master)} registros.")
+                st.dataframe(df_master.head(20), use_container_width=True)
             except Exception as e:
-                st.error(f"Erro ao consolidar histórico: {e}")
+                st.error(f"Erro na consolidação: {e}")
 
         st.divider()
-
-        # Action 2: Process a single file (Incremental) (ONLY TESTING)
-        st.write("### 📄 Processamento Individual")
-        if st.button("Rodar Processamento Individual (Bronze -> Silver)"):
-            try:
-                filename = "master_historic_silver.csv" 
-                with st.spinner("Limpando dados..."):
-                    df_silver = processor.process_bronze_to_silver(filename)
-                st.success("Arquivo individual processado.")
-                st.dataframe(df_silver.head(10), width="stretch")
-            except FileNotFoundError:
-                st.error("Arquivo 'master_historic_silver.csv' não encontrado.")
-            except Exception as e:
-                st.error(f"Erro inesperado: {e}")
+        st.write("### 🔍 Inspeção da Camada Silver")
+        master_silver = processor.silver_path / "master_historic_silver.csv"
+        
+        if master_silver.exists():
+            if st.button("Visualizar Dados Consolidados"):
+                df_view = pd.read_csv(master_silver)
+                st.write(f"Total: {df_view.shape[0]} linhas.")
+                st.dataframe(df_view, use_container_width=True)
+        else:
+            st.warning("Arquivo 'master_historic_silver.csv' não encontrado.")
 
     # --- TAB 3: DASHBOARD ---
     with dashboard_tab:
-        st.subheader("Indicadores de Ocorrências")
-        st.write("Gráficos baseados nos dados processados.")
-        
-        # Placeholder chart
+        st.subheader("Indicadores")
         chart_data = pd.DataFrame({
             "Mês": ["Jan", "Fev", "Mar", "Abr"],
             "Ocorrências": [45, 32, 58, 41]
-        })
-        st.area_chart(chart_data.set_index("Mês"), color="#d32f2f")
+        }).set_index("Mês")
+        st.area_chart(chart_data, color=FIRE_DEPT_RED)
 
 if __name__ == "__main__":
     main()
