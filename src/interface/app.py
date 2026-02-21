@@ -74,110 +74,20 @@ def main():
         st.subheader("Extração Automatizada")
         
         if st.button("Iniciar Extração"):
-            with st.status("Preparando ambiente...", expanded=True) as status:
-                
-                # Action 1: Terminate Excel processes
-                st.write("Encerrando processos do Excel...")
-                count = bot.close_excel_processes()
-                msg = f"Encerradas {count} instâncias." if count > 0 else "Nenhuma instância aberta."
-                st.write(msg)
-                
-                # Action 2: Focus and Prepare CAD Window
-                st.write("Localizando e focando janela do sistema CAD...")
-                time.sleep(1)
-                
-                if not bot.focus_cad_window():
-                    status.update(label="Erro na Localização", state="error")
-                    st.error("Certifique-se de que o CAD está aberto com o título correto.")
-                    st.stop() # Stops Streamlit execution here if failed
+            # Criamos o arquivo de destino aqui (única info que a interface gera)
+            timestamp = int(time.time())
+            bronze_file_path = BRONZE_DIR / f"raw_export_{timestamp}.csv"
 
-                st.write("✅ Janela do CAD localizada.")
+            with st.status("Executando automação CAD...", expanded=True) as status:
+                # Chamamos o mestre: o bot assume o controle
+                success = bot.run_full_extraction_flow(bronze_file_path, status)
                 
-                # Action 3: Step 01 - Verify Call Filter
-                st.write("Verificando Filtro de Chamadas...")
-                if not bot.check_passos_filter():
-                    status.update(label="Ação Manual Requerida", state="error")
-                    st.error("Filtro incorreto! Selecione 'PASSOS' no CAD e tente novamente.")
-                    st.stop()
-
-                st.write("✅ Filtro 'PASSOS' confirmado.")
-                
-                # Action 4: Step 02 - Click Calls Module
-                st.write("Acessando módulo de chamadas...")
-                if not bot.click_calls_button():
-                    status.update(label="Erro na Navegação", state="error")
-                    st.error("Não foi possível encontrar o botão de chamadas (02).")
-                    st.stop()
-
-                st.write("✅ Módulo de chamadas aberto.")
-                time.sleep(1.5) # Wait for Java UI rendering
-                
-                # Action 5: Step 03 - Open Search Tool
-                st.write("Abrindo ferramenta de pesquisa...")
-                if not bot.click_search_button():
-                    status.update(label="Erro na Pesquisa", state="error")
-                    st.error("Não foi possível encontrar o botão de pesquisa (03).")
-                    st.stop()
-
-                st.write("✅ Janela de pesquisa aberta.")
-                time.sleep(1)
-                
-                # Action 6: Step 04 - Select Classified Occurrences
-                st.write("Selecionando ocorrências classificadas...")
-                if not bot.click_classified_button():
-                    status.update(label="Erro no Filtro", state="error")
-                    st.error("Não foi possível localizar o botão de classificadas (04).")
-                    st.stop()
-
-                # Action 7: Step 05 - Select Last 24 Hours
-                st.write("Selecionando filtro de últimas 24 horas...")
-                if not bot.click_last_24h_button():
-                    status.update(label="Erro no Filtro", state="error")
-                    st.error("Não foi possível localizar o botão de 24h (05).")
-                    st.stop()
-                
-                time.sleep(0.5) # Brief pause for UI feedback
-
-                # Action 8: Step 06 - Select Last 3 Months
-                st.write("Selecionando filtro de últimos 3 meses...")
-                if not bot.click_last_3_months_button():
-                    status.update(label="Erro no Filtro", state="error")
-                    st.error("Não foi possível localizar o botão de 3 meses (06).")
-                    st.stop()
-
-                # Action 9: Steps 07 & 08 - City Filtering
-                st.write("Filtrando ocorrências da cidade de Passos...")
-                if not bot.filter_by_city_name("passos"):
-                    status.update(label="Erro no Filtro de Cidade", state="error")
-                    st.error("Falha ao digitar ou confirmar a cidade (07/08).")
-                    st.stop()
-                
-                # Action 10: Step 09 - Exporting Data
-                st.write("Solicitando exportação de dados...")
-                time.sleep(1) # Wait for Java to process the list before export is available
-                
-                if not bot.click_export_button():
-                    status.update(label="Erro na Exportação", state="error")
-                    st.error("Não foi possível encontrar o botão de exportar (09).")
-                    st.stop()
-
-                st.write("Detectando planilha aberta e salvando na Bronze...")
-                
-                bronze_file_path = BRONZE_DIR / f"raw_export_{int(time.time())}.csv"
-
-                if bot.save_excel_export(bronze_file_path):
-                    st.write(f"✅ Arquivo salvo em: {bronze_file_path.name}")
+                if success:
                     status.update(label="Extração Completa!", state="complete")
-                    st.success(f"Dados exportados com sucesso para a camada Bronze!")
+                    st.success(f"Dados salvos com sucesso: {bronze_file_path.name}")
                 else:
-                    status.update(label="Erro no Salvamento", state="error")
-                    st.error("O Excel abriu, mas não conseguimos salvar o arquivo via código.")
-                    st.stop()
-
-                # Success State
-                st.write("✅ Comando de exportação enviado.")
-                status.update(label="Exportação Iniciada!", state="complete")
-                st.success("O bot acionou a exportação. Aguardando janela de salvamento...")
+                    status.update(label="Falha na Extração", state="error")
+                    st.error("Ocorreu um erro durante o processo. Verifique os logs.")
 
     # --- TAB 2: PROCESSING ---
     with processing_tab:

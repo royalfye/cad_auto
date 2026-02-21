@@ -44,6 +44,48 @@ class CADAutomationBot:
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.2
 
+    def run_full_extraction_flow(self, output_path: Path, ui_status) -> bool:
+        """
+        Orchestrates the complete RPA sequence from environment prep to final save.
+        ui_status: The Streamlit status object to report progress.
+        """
+        try:
+            ui_status.write("🧹 Encerrando instâncias do Excel...")
+            self.close_excel_processes()
+
+            ui_status.write("🔍 Localizando janela do CAD...")
+            if not self.focus_cad_window():
+                return False
+
+            ui_status.write("✅ Verificando filtros iniciais...")
+            if not self.check_passos_filter():
+                return False
+
+            ui_status.write("🖱️ Navegando pelos módulos...")
+            if not self.click_calls_button(): return False
+            time.sleep(1)
+            
+            if not self.click_search_button(): return False
+            if not self.click_classified_button(): return False
+            if not self.click_last_24h_button(): return False
+            if not self.click_last_3_months_button(): return False
+            
+            ui_status.write("✍️ Filtrando cidade: Passos...")
+            if not self.filter_by_city_name("passos"): return False
+
+            ui_status.write("📤 Exportando para Excel...")
+            if not self.click_export_button(): return False
+
+            ui_status.write("💾 Capturando dados do Excel via COM...")
+            if not self.save_excel_export(output_path):
+                return False
+
+            return True
+
+        except Exception as e:
+            logging.error(f"Critical error in extraction flow: {e}")
+            return False
+
     def save_excel_export(self, output_path: Path) -> bool:
         """
         Connects to the active Excel instance via COM API and saves as CSV.
@@ -244,20 +286,17 @@ class CADAutomationBot:
     
     def click_classified_button(self) -> bool:
         """
-        Locates and clicks the 'Classificadas' button (04_classificadas_button.png).
-        This usually filters for already classified/closed occurrences.
-        Returns:
-            bool: True if clicked, False otherwise.
+        Locates and clicks the 'Classificadas' button (04).
+        Includes a small delay for Java UI rendering.
         """
         target_image = str(self.assets_path / "04_classificadas_button.png")
         
-        if not os.path.exists(target_image):
-            logging.error(f"Image not found: {target_image}")
-            return False
+        # Pausa estratégica: Janelas de pesquisa em Java demoram a carregar os componentes internos
+        time.sleep(0.8) 
 
         try:
-            # Busca o botão de ocorrências classificadas
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+            # Aumentamos um pouco a confiança para evitar falsos positivos em botões cinzas
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
             
             if location:
                 pyautogui.click(location)
