@@ -7,10 +7,15 @@ import pandas as pd
 import streamlit as st
 
 # --- PATH CONFIGURATION ---
-current_dir = Path(__file__).resolve().parent
-src_root = current_dir.parent
+current_dir = Path(__file__).resolve().parent  # cad-auto/src/interface
+src_root = current_dir.parent                 # cad-auto/src
+project_root = src_root.parent                # cad-auto
+
 if str(src_root) not in sys.path:
     sys.path.append(str(src_root))
+
+BRONZE_DIR = project_root / "data" / "01_bronze"
+SILVER_DIR = project_root / "data" / "02_silver"
 
 # Importamos a CLASSE agora, seguindo a boa prática de encapsulamento
 from bot.cad_bot import CADAutomationBot
@@ -154,6 +159,19 @@ def main():
                 if not bot.click_export_button():
                     status.update(label="Erro na Exportação", state="error")
                     st.error("Não foi possível encontrar o botão de exportar (09).")
+                    st.stop()
+
+                st.write("Detectando planilha aberta e salvando na Bronze...")
+                
+                bronze_file_path = BRONZE_DIR / f"raw_export_{int(time.time())}.csv"
+
+                if bot.save_excel_export(bronze_file_path):
+                    st.write(f"✅ Arquivo salvo em: {bronze_file_path.name}")
+                    status.update(label="Extração Completa!", state="complete")
+                    st.success(f"Dados exportados com sucesso para a camada Bronze!")
+                else:
+                    status.update(label="Erro no Salvamento", state="error")
+                    st.error("O Excel abriu, mas não conseguimos salvar o arquivo via código.")
                     st.stop()
 
                 # Success State

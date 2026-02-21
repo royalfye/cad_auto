@@ -5,8 +5,22 @@ import logging
 import psutil
 import pygetwindow as gw
 import pyautogui
+import win32com.client
+import pythoncom
+from pathlib import Path
 
-# --- GLOBAL CONFIGURATION (PEP 8) ---
+# Pega o caminho de onde este arquivo está (ex: src/interface/app.py)
+current_file = Path(__file__).resolve()
+
+# Sobe dois níveis para chegar na raiz (cad-auto/)
+project_root = current_file.parent.parent.parent 
+
+# Agora define os caminhos de forma absoluta e segura
+BRONZE_PATH = project_root / "data" / "01_bronze"
+SILVER_PATH = project_root / "data" / "02_silver"
+GOLD_PATH   = project_root / "data" / "03_gold"
+
+# --- GLOBAL CONFIGURATION ---
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -14,14 +28,64 @@ logging.basicConfig(
 
 class CADAutomationBot:
     def __init__(self):
+        # 1. Path Management (Single Source of Truth)
+        # current_file: src/bot/cad_bot.py
+        self.bot_dir = Path(__file__).resolve().parent
+        self.project_root = self.bot_dir.parent.parent
+        
+        # Assets path using the root
+        self.assets_path = self.project_root / "assets" / "images" / "cad_targets"
+        
+        # 2. Application Constants
         self.cad_title = "CAD - Solução de Controle do Atendimento e Despacho de Emergência Policial e de Bombeiros"
         self.excel_process = "EXCEL.EXE"
         
-        # Path configuration for assets
-        self.assets_path = Path(__file__).resolve().parent.parent.parent / "assets" / "images" / "cad_targets"
-        
+        # 3. PyAutoGUI Settings
         pyautogui.FAILSAFE = True
-        pyautogui.PAUSE = 0.5
+        pyautogui.PAUSE = 0.2
+
+    def save_excel_export(self, output_path: Path) -> bool:
+        """
+        Connects to the active Excel instance via COM API and saves as CSV.
+        """
+        # Inicializa a thread do Windows para o COM
+        pythoncom.CoInitialize()
+        
+        try:
+            logging.info("Connecting to Excel via COM Object...")
+            # Wait for Excel to fully render the data from CAD
+            time.sleep(3) 
+            
+            # Hook into the existing Excel instance
+            excel = win32com.client.GetActiveObject("Excel.Application")
+            excel.Visible = False  
+            excel.DisplayAlerts = False 
+
+            workbook = excel.ActiveWorkbook
+            if not workbook:
+                logging.error("No active workbook found.")
+                return False
+
+            # Ensure Bronze folder exists before saving
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # SaveAs (FileFormat=6 is CSV)
+            # Use str() because the COM object doesn't understand Path objects
+            workbook.SaveAs(str(output_path), FileFormat=6)
+            logging.info(f"Bronze layer updated: {output_path.name}")
+
+            workbook.Close(SaveChanges=False)
+            excel.Quit()
+            return True
+
+        except Exception as e:
+            logging.error(f"COM Automation failed: {e}")
+            return False
+        finally:
+            # Libera a thread (Boa prática de memória)
+            pythoncom.CoUninitialize()
+
+
 
     def check_passos_filter(self) -> bool:
         """
@@ -268,12 +332,12 @@ class CADAutomationBot:
                 return False
             
             pyautogui.click(field_loc)
-            time.sleep(0.5) # Wait for focus
+            time.sleep(0.2) # Wait for focus
             
             # Type the city name
             pyautogui.write(city_name, interval=0.1)
             logging.info(f"Typed city: {city_name}")
-            time.sleep(0.5)
+            time.sleep(0.2)
 
             # Step 08: Click the confirmation button
             confirm_loc = pyautogui.locateCenterOnScreen(img_confirm, confidence=0.9)
