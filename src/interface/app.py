@@ -64,28 +64,102 @@ def main():
         "📊 Visualização"
     ])
 
-    # --- TAB 1: EXTRACTION ---
+# --- TAB 1: EXTRACTION ---
     with extraction_tab:
         st.subheader("Extração Automatizada")
+        
         if st.button("Iniciar Extração"):
             with st.status("Preparando ambiente...", expanded=True) as status:
-                # Ação 1: Fechar Excel
+                
+                # Action 1: Terminate Excel processes
                 st.write("Encerrando processos do Excel...")
                 count = bot.close_excel_processes()
                 msg = f"Encerradas {count} instâncias." if count > 0 else "Nenhuma instância aberta."
                 st.write(msg)
                 
-                # Ação 2: Focar Janela do CAD
-                st.write("Localizando janela do sistema CAD...")
+                # Action 2: Focus and Prepare CAD Window
+                st.write("Localizando e focando janela do sistema CAD...")
                 time.sleep(1)
                 
-                if bot.focus_cad_window():
-                    st.write("✅ Janela do CAD localizada e focada.")
-                    status.update(label="Ambiente Pronto!", state="complete")
-                    st.success("O sistema está pronto. Proceda com a extração manual ou automática no CAD.")
-                else:
+                if not bot.focus_cad_window():
                     status.update(label="Erro na Localização", state="error")
                     st.error("Certifique-se de que o CAD está aberto com o título correto.")
+                    st.stop() # Stops Streamlit execution here if failed
+
+                st.write("✅ Janela do CAD localizada.")
+                
+                # Action 3: Step 01 - Verify Call Filter
+                st.write("Verificando Filtro de Chamadas...")
+                if not bot.check_passos_filter():
+                    status.update(label="Ação Manual Requerida", state="error")
+                    st.error("Filtro incorreto! Selecione 'PASSOS' no CAD e tente novamente.")
+                    st.stop()
+
+                st.write("✅ Filtro 'PASSOS' confirmado.")
+                
+                # Action 4: Step 02 - Click Calls Module
+                st.write("Acessando módulo de chamadas...")
+                if not bot.click_calls_button():
+                    status.update(label="Erro na Navegação", state="error")
+                    st.error("Não foi possível encontrar o botão de chamadas (02).")
+                    st.stop()
+
+                st.write("✅ Módulo de chamadas aberto.")
+                time.sleep(1.5) # Wait for Java UI rendering
+                
+                # Action 5: Step 03 - Open Search Tool
+                st.write("Abrindo ferramenta de pesquisa...")
+                if not bot.click_search_button():
+                    status.update(label="Erro na Pesquisa", state="error")
+                    st.error("Não foi possível encontrar o botão de pesquisa (03).")
+                    st.stop()
+
+                st.write("✅ Janela de pesquisa aberta.")
+                time.sleep(1)
+                
+                # Action 6: Step 04 - Select Classified Occurrences
+                st.write("Selecionando ocorrências classificadas...")
+                if not bot.click_classified_button():
+                    status.update(label="Erro no Filtro", state="error")
+                    st.error("Não foi possível localizar o botão de classificadas (04).")
+                    st.stop()
+
+                # Action 7: Step 05 - Select Last 24 Hours
+                st.write("Selecionando filtro de últimas 24 horas...")
+                if not bot.click_last_24h_button():
+                    status.update(label="Erro no Filtro", state="error")
+                    st.error("Não foi possível localizar o botão de 24h (05).")
+                    st.stop()
+                
+                time.sleep(0.5) # Brief pause for UI feedback
+
+                # Action 8: Step 06 - Select Last 3 Months
+                st.write("Selecionando filtro de últimos 3 meses...")
+                if not bot.click_last_3_months_button():
+                    status.update(label="Erro no Filtro", state="error")
+                    st.error("Não foi possível localizar o botão de 3 meses (06).")
+                    st.stop()
+
+                # Action 9: Steps 07 & 08 - City Filtering
+                st.write("Filtrando ocorrências da cidade de Passos...")
+                if not bot.filter_by_city_name("passos"):
+                    status.update(label="Erro no Filtro de Cidade", state="error")
+                    st.error("Falha ao digitar ou confirmar a cidade (07/08).")
+                    st.stop()
+                
+                # Action 10: Step 09 - Exporting Data
+                st.write("Solicitando exportação de dados...")
+                time.sleep(1) # Wait for Java to process the list before export is available
+                
+                if not bot.click_export_button():
+                    status.update(label="Erro na Exportação", state="error")
+                    st.error("Não foi possível encontrar o botão de exportar (09).")
+                    st.stop()
+
+                # Success State
+                st.write("✅ Comando de exportação enviado.")
+                status.update(label="Exportação Iniciada!", state="complete")
+                st.success("O bot acionou a exportação. Aguardando janela de salvamento...")
 
     # --- TAB 2: PROCESSING ---
     with processing_tab:
