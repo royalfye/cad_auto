@@ -9,13 +9,13 @@ import win32com.client
 import pythoncom
 from pathlib import Path
 
-# Pega o caminho de onde este arquivo está (ex: src/interface/app.py)
+# Get the path of this file (ex: src/interface/app.py)
 current_file = Path(__file__).resolve()
 
-# Sobe dois níveis para chegar na raiz (cad-auto/)
+# Go to levels up until the root (cad-auto/)
 project_root = current_file.parent.parent.parent 
 
-# Agora define os caminhos de forma absoluta e segura
+# Define the path safe and sound
 BRONZE_PATH = project_root / "data" / "01_bronze"
 SILVER_PATH = project_root / "data" / "02_silver"
 GOLD_PATH   = project_root / "data" / "03_gold"
@@ -90,7 +90,7 @@ class CADAutomationBot:
         """
         Connects to the active Excel instance via COM API and saves as CSV.
         """
-        # Inicializa a thread do Windows para o COM
+        # Inicialize a thread do Windows para o COM
         pythoncom.CoInitialize()
         
         try:
@@ -269,7 +269,7 @@ class CADAutomationBot:
             return False
 
         try:
-            # Procuro o botão de pesquisa
+            # Search for search button
             location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
             
             if location:
@@ -291,11 +291,9 @@ class CADAutomationBot:
         """
         target_image = str(self.assets_path / "04_classificadas_button.png")
         
-        # Pausa estratégica: Janelas de pesquisa em Java demoram a carregar os componentes internos
         time.sleep(0.8) 
 
         try:
-            # Aumentamos um pouco a confiança para evitar falsos positivos em botões cinzas
             location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
             
             if location:

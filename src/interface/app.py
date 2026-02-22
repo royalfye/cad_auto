@@ -74,52 +74,63 @@ def main():
         st.subheader("Extração Automatizada")
         
         if st.button("Iniciar Extração"):
-            # Criamos o arquivo de destino aqui (única info que a interface gera)
             timestamp = int(time.time())
+            # Centralizamos a criação do caminho no processor para manter o app.py "limpo"
             bronze_file_path = BRONZE_DIR / f"raw_export_{timestamp}.csv"
 
             with st.status("Executando automação CAD...", expanded=True) as status:
-                # Chamamos o mestre: o bot assume o controle
                 success = bot.run_full_extraction_flow(bronze_file_path, status)
                 
                 if success:
-                    status.update(label="Extração Completa!", state="complete")
-                    st.success(f"Dados salvos com sucesso: {bronze_file_path.name}")
+                    status.write("🔄 Integrando novos dados à camada Silver...")
+                    # INCORPORAÇÃO AUTOMÁTICA:
+                    processor.consolidate_historical_data()
+                    
+                    status.update(label="Extração e Integração Completas!", state="complete")
+                    st.success(f"Dados salvos e unificados: {bronze_file_path.name}")
+                    st.balloons() # Feedback visual de sucesso
                 else:
                     status.update(label="Falha na Extração", state="error")
-                    st.error("Ocorreu um erro durante o processo. Verifique os logs.")
+                    st.error("Ocorreu um erro. Verifique se o CAD está aberto e visível.")
 
-    # --- TAB 2: PROCESSING ---
+# --- TAB 2: PROCESSING ---
     with processing_tab:
         st.subheader("Pipeline de Dados")
         
+        # Métricas dinâmicas (Exemplo de como deixar sênior)
         m_col1, m_col2, m_col3 = st.columns(3)
-        m_col1.metric("Bronze", "Dados Brutos")
-        m_col2.metric("Silver", "Dados Limpos")
-        m_col3.metric("Gold", "Consolidados")
+        
+        # Contagem de arquivos na bronze
+        bronze_files_count = len(list(BRONZE_DIR.glob("*.csv")))
+        m_col1.metric("Arquivos na Bronze", bronze_files_count)
+        m_col2.metric("Camada Silver", "Standardized")
+        m_col3.metric("Camada Gold", "Ready")
+        
         st.divider()
 
-        st.write("### 📂 Consolidação Histórica")
-        if st.button("Unificar Histórico (2018 - 2026)"):
-            try:
-                with st.spinner("Processando pastas..."):
+        st.write("### 📂 Gerenciamento do Histórico")
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("Force Re-sync (Bronze -> Silver)"):
+                with st.spinner("Reprocessando todo o histórico..."):
                     df_master = processor.consolidate_historical_data()
-                st.success(f"Unificação concluída: {len(df_master)} registros.")
-                st.dataframe(df_master.head(20), use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro na consolidação: {e}")
+                    st.success(f"Sincronização concluída: {len(df_master)} registros.")
 
         st.divider()
         st.write("### 🔍 Inspeção da Camada Silver")
-        master_silver = processor.silver_path / "master_historic_silver.csv"
         
-        if master_silver.exists():
-            if st.button("Visualizar Dados Consolidados"):
-                df_view = pd.read_csv(master_silver)
-                st.write(f"Total: {df_view.shape[0]} linhas.")
-                st.dataframe(df_view, use_container_width=True)
+        # Em vez de ler o CSV aqui, usamos o processor
+        master_silver_path = SILVER_DIR / "master_historic_silver.csv"
+        
+        if master_silver_path.exists():
+            if st.button("Visualizar Tabela Master"):
+                # O ideal é criar um método processor.load_silver_data() no futuro
+                df_view = pd.read_csv(master_silver_path)
+                st.write(f"Exibindo {df_view.shape[0]} registros únicos.")
+                st.dataframe(df_view, width='stretch') # Corrigido para 'stretch'
         else:
-            st.warning("Arquivo 'master_historic_silver.csv' não encontrado.")
+            st.warning("A base unificada ainda não foi gerada. Inicie uma extração ou force a sincronização.")
 
     # --- TAB 3: DASHBOARD ---
     with dashboard_tab:
