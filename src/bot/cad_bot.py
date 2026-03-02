@@ -79,6 +79,12 @@ class CADAutomationBot:
             ui_status.write("💾 Capturando dados do Excel via COM...")
             if not self.save_excel_export(output_path):
                 return False
+            
+            ui_status.write("🧹 Limpando janelas residuais...")
+            self.close_search_subwindow()
+            
+            # Ensure the main CAD window is focused again at the end
+            self.focus_cad_window()
 
             return True
 
@@ -417,6 +423,36 @@ class CADAutomationBot:
 
         except Exception as e:
             logging.error(f"Error while clicking export button: {e}")
+            return False
+
+    def close_search_subwindow(self) -> bool:
+        """
+        Locates the 'Pesquisa Chamadas' subwindow and closes it to 
+        return the CAD to its initial state.
+        """
+        subwindow_title = "Pesquisa Chamadas"
+        try:
+            # Search for the specific subwindow
+            windows = gw.getWindowsWithTitle(subwindow_title)
+            
+            if not windows:
+                logging.info(f"Subwindow '{subwindow_title}' already closed or not found.")
+                return True # Not an error, it's already in the desired state
+
+            subwindow = windows[0]
+            
+            # Bringing to front and closing
+            subwindow.activate()
+            time.sleep(0.5)
+            subwindow.close()
+            
+            logging.info(f"Subwindow '{subwindow_title}' closed successfully.")
+            return True
+
+        except Exception as e:
+            logging.error(f"Failed to close subwindow '{subwindow_title}': {e}")
+            # Fallback: Send ESC key if window.close() fails
+            pyautogui.press('esc')
             return False
         
 

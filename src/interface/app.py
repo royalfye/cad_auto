@@ -91,7 +91,7 @@ def main():
                     st.balloons() # Feedback visual de sucesso
                 else:
                     status.update(label="Falha na Extração", state="error")
-                    st.error("Ocorreu um erro. Verifique se o CAD está aberto e visível.")
+                    st.error("Ocorreu um erro. Verifique se o CAD está aberto e visível. Minimize/maximize e clique novamente.")
 
 # --- TAB 2: PROCESSING ---
     with processing_tab:
