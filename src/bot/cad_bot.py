@@ -8,6 +8,7 @@ import pyautogui
 import win32com.client
 import pythoncom
 from pathlib import Path
+from datetime import datetime
 
 # Get the path of this file (ex: src/interface/app.py)
 current_file = Path(__file__).resolve()
@@ -20,7 +21,7 @@ BRONZE_PATH = project_root / "data" / "01_bronze"
 SILVER_PATH = project_root / "data" / "02_silver"
 GOLD_PATH   = project_root / "data" / "03_gold"
 
-# --- GLOBAL CONFIGURATION ---
+# Global Config
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -44,10 +45,60 @@ class CADAutomationBot:
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.2
 
-    def run_full_extraction_flow(self, output_path: Path, ui_status) -> bool:
+    def run_full_extraction_flow(self, bronze_root: Path, ui_status) -> bool:
         """
-        Orchestrates the complete RPA sequence from environment prep to final save.
-        ui_status: The Streamlit status object to report progress.
+        Orchestrates the complete RPA sequence for HISTORICAL data.
+        """
+        try:
+            # Close all Excel processes
+            ui_status.write("🧹 Encerrando instâncias do Excel...")
+            self.close_excel_processes()
+            # Focus on Cad Window
+            ui_status.write("🔍 Localizando janela do CAD...")
+            if not self.focus_cad_window():
+                return False
+            # Check if it is selected on Passos city
+            ui_status.write("✅ Verificando filtros iniciais...")
+            if not self.check_passos_filter():
+                return False
+            # Click on calls_button.pnq in assets folder
+            ui_status.write("🖱️ Navegando pelos módulos...")
+            if not self.click_calls_button(): return False
+            time.sleep(1)
+            
+            # Sequence for historical/classified calls
+            if not self.click_search_button(): return False
+            if not self.click_classified_button(): return False
+            if not self.click_last_24h_button(): return False
+            if not self.click_last_3_months_button(): return False
+            
+            ui_status.write("✍️ Filtrando cidade: Passos...")
+            if not self.filter_by_city_name("passos"): return False
+
+            ui_status.write("📤 Exportando para Excel...")
+            if not self.click_export_button(): return False
+
+            # --- AJUSTE AQUI ---
+            # Chamamos a função passando a raiz da bronze e o tipo 'historical'
+            ui_status.write("💾 Capturando dados do Excel via COM...")
+            if not self.save_excel_export(bronze_root, extraction_type="historical"):
+                return False
+            
+            ui_status.write("🧹 Limpando janelas residuais...")
+            self.close_search_subwindow()
+            
+            # Final focus for user experience
+            self.focus_cad_window()
+
+            return True
+
+        except Exception as e:
+            logging.error(f"Critical error in historical extraction flow: {e}")
+            return False
+        
+    def run_active_extraction_flow(self, bronze_root: Path, ui_status) -> bool:
+        """
+        Orchestrates the RPA sequence for ACTIVE (real-time) calls.
         """
         try:
             ui_status.write("🧹 Encerrando instâncias do Excel...")
@@ -65,48 +116,42 @@ class CADAutomationBot:
             if not self.click_calls_button(): return False
             time.sleep(1)
             
+            # Sequence for historical/classified calls
             if not self.click_search_button(): return False
-            if not self.click_classified_button(): return False
-            if not self.click_last_24h_button(): return False
-            if not self.click_last_3_months_button(): return False
-            
+            if not self.click_active_button(): return False
             ui_status.write("✍️ Filtrando cidade: Passos...")
             if not self.filter_by_city_name("passos"): return False
-
-            ui_status.write("📤 Exportando para Excel...")
+            
+            ui_status.write("📤 Exportando chamadas ativas...")
             if not self.click_export_button(): return False
 
-            ui_status.write("💾 Capturando dados do Excel via COM...")
-            if not self.save_excel_export(output_path):
+            # Chamamos a MESMA função de salvamento, mas com a flag 'active'
+            if not self.save_excel_export(bronze_root, extraction_type="active"):
                 return False
             
             ui_status.write("🧹 Limpando janelas residuais...")
             self.close_search_subwindow()
             
-            # Ensure the main CAD window is focused again at the end
+            # Final focus for user experience
             self.focus_cad_window()
 
             return True
-
         except Exception as e:
-            logging.error(f"Critical error in extraction flow: {e}")
+            logging.error(f"Error in active flow: {e}")
             return False
 
-    def save_excel_export(self, output_path: Path) -> bool:
+    def save_excel_export(self, folder_path: Path, extraction_type: str = "historical") -> bool:
         """
-        Connects to the active Excel instance via COM API and saves as CSV.
+        Saves the active Excel workbook as a CSV in the Bronze layer.
+        extraction_type: Can be 'active' or 'historical' to differentiate folders/files.
         """
-        # Inicialize a thread do Windows para o COM
         pythoncom.CoInitialize()
         
         try:
-            logging.info("Connecting to Excel via COM Object...")
-            # Wait for Excel to fully render the data from CAD
+            logging.info(f"Connecting to Excel via COM for {extraction_type} extraction...")
             time.sleep(3) 
             
-            # Hook into the existing Excel instance
             excel = win32com.client.GetActiveObject("Excel.Application")
-            excel.Visible = False  
             excel.DisplayAlerts = False 
 
             workbook = excel.ActiveWorkbook
@@ -114,13 +159,20 @@ class CADAutomationBot:
                 logging.error("No active workbook found.")
                 return False
 
-            # Ensure Bronze folder exists before saving
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            # --- STEP: GENERATE FILENAME ---
+            # Format: 2026-03-01_14-30_active.csv
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            filename = f"{timestamp}_{extraction_type}.csv"
+            
+            # Define target path (01_bronze/active/ or 01_bronze/historical/)
+            target_dir = folder_path / extraction_type
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            full_output_path = target_dir / filename
 
             # SaveAs (FileFormat=6 is CSV)
-            # Use str() because the COM object doesn't understand Path objects
-            workbook.SaveAs(str(output_path), FileFormat=6)
-            logging.info(f"Bronze layer updated: {output_path.name}")
+            workbook.SaveAs(str(full_output_path), FileFormat=6)
+            logging.info(f"Bronze layer updated: {full_output_path}")
 
             workbook.Close(SaveChanges=False)
             excel.Quit()
@@ -130,7 +182,6 @@ class CADAutomationBot:
             logging.error(f"COM Automation failed: {e}")
             return False
         finally:
-            # Libera a thread (Boa prática de memória)
             pythoncom.CoUninitialize()
 
 
@@ -313,6 +364,32 @@ class CADAutomationBot:
         except Exception as e:
             logging.error(f"Error clicking classified button: {e}")
             return False
+    
+    def click_active_button(self) -> bool:
+        """
+        Locates and clicks the 'Ativas' button (10).
+        Includes a small delay for Java UI rendering.
+        """
+        target_image = str(self.assets_path / "10_ativas_button.png")
+        
+        time.sleep(0.8) 
+
+        try:
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
+            
+            if location:
+                pyautogui.click(location)
+                logging.info("Active button (04) clicked successfully.")
+                return True
+            
+            logging.warning("Active button (04) not found on screen.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error clicking active button: {e}")
+            return False
+        
+    
         
     def click_last_24h_button(self) -> bool:
         """

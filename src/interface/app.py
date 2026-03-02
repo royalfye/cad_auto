@@ -71,28 +71,35 @@ def main():
 
 # --- TAB 1: EXTRACTION ---
     with extraction_tab:
-        st.subheader("Extração Automatizada")
-        
-        if st.button("Iniciar Extração"):
-            timestamp = int(time.time())
-            # Centralizamos a criação do caminho no processor para manter o app.py "limpo"
-            bronze_file_path = BRONZE_DIR / f"raw_export_{timestamp}.csv"
+        st.subheader("Extração Automatizada de Ocorrências")
+        st.info("Selecione o tipo de extração desejada. Certifique-se de que o CAD está aberto.")
 
-            with st.status("Executando automação CAD...", expanded=True) as status:
-                success = bot.run_full_extraction_flow(bronze_file_path, status)
-                
-                if success:
-                    status.write("🔄 Integrando novos dados à camada Silver...")
-                    # INCORPORAÇÃO AUTOMÁTICA:
-                    processor.consolidate_historical_data()
-                    
-                    status.update(label="Extração e Integração Completas!", state="complete")
-                    st.success(f"Dados salvos e unificados: {bronze_file_path.name}")
-                    st.balloons() # Feedback visual de sucesso
-                else:
-                    status.update(label="Falha na Extração", state="error")
-                    st.error("Ocorreu um erro. Verifique se o CAD está aberto e visível. Minimize/maximize e clique novamente.")
+        col_hist, col_act = st.columns(2)
 
+        with col_hist:
+            st.write("### 📜 Dados Históricos")
+            st.caption("Extrai chamadas classificadas dos últimos 3 meses.")
+            if st.button("🚀 Sincronizar Histórico", key="btn_hist"):
+                with st.status("Executando extração histórica...", expanded=True) as status:
+                    # Passamos a raiz da bronze
+                    success = bot.run_full_extraction_flow(processor.bronze_path, status)
+                    if success:
+                        status.update(label="Histórico Sincronizado!", state="complete")
+                        st.success("Dados salvos em bronze/historical/")
+                    else:
+                        status.update(label="Falha no Processo", state="error")
+
+        with col_act:
+            st.write("### 🚨 Chamadas Ativas")
+            st.caption("Extrai as ocorrências em andamento (Tempo Real).")
+            if st.button("🔴 Monitorar Ativas", key="btn_active"):
+                with st.status("Capturando chamadas em aberto...", expanded=True) as status:
+                    success = bot.run_active_extraction_flow(processor.bronze_path, status)
+                    if success:
+                        status.update(label="Ativas Capturadas!", state="complete")
+                        st.success("Dados salvos em bronze/active/")
+                    else:
+                        status.update(label="Falha na Captura", state="error")
 # --- TAB 2: PROCESSING ---
     with processing_tab:
         st.subheader("Pipeline de Dados")
