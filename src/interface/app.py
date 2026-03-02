@@ -1,128 +1,53 @@
+# 1. Bibliotecas padrão do sistema (Standard Library)
 import sys
-import pandas as pd
 from pathlib import Path
 
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QTabWidget, 
-                             QFrame, QProgressBar, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QSpacerItem, QSizePolicy, QGraphicsDropShadowEffect)
-from PySide6.QtCore import Qt, QThread, Signal, QSize
+# 2. Bibliotecas de terceiros (Third-party)
+import pandas as pd
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QPushButton, QLabel, QTabWidget, QFrame, QProgressBar, 
+    QTableWidget, QTableWidgetItem, QHeaderView, QSpacerItem, 
+    QSizePolicy, QGraphicsDropShadowEffect, QTableView
+)
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QAbstractTableModel
 from PySide6.QtGui import QIcon, QFont, QColor
 
-# Configuração de Caminhos (Sua Lógica)
+# 3. Configuração de Caminhos (Hack necessário para módulos locais)
 current_dir = Path(__file__).resolve().parent
 src_root = current_dir.parent
 if str(src_root) not in sys.path:
     sys.path.append(str(src_root))
 
+# 4. Módulos do seu projeto (Local imports)
 from bot.cad_bot import CADAutomationBot
 from processing.data_handler import DataProcessor
+from interface.styles import STYLE_SHEET
+
+class PandasModel(QAbstractTableModel):
+    def __init__(self, data):
+        super().__init__()
+        self._data = data
+
+    def rowCount(self, parent=None):
+        return self._data.shape[0]
+
+    def columnCount(self, parent=None):
+        return self._data.shape[1]
+
+    def data(self, index, role=Qt.DisplayRole):
+        if index.isValid() and role == Qt.DisplayRole:
+            value = self._data.iloc[index.row(), index.column()]
+            return str(value)
+        return None
+
+    def headerData(self, col, orientation, role):
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            return self._data.columns[col]
+        return None
 
 # --- ESTILIZAÇÃO QSS MODERNA ---
-STYLE_SHEET = """
-QMainWindow { 
-    background-color: #f3f3f9; 
-}
 
-/* Sidebar / Barra Lateral */
-#SideBar { 
-    background-color: #2d4157; 
-    min-width: 250px; 
-    max-width: 250px;
-    border-right: 1px solid #d0d0d0;
-}
-
-/* Títulos */
-QLabel#MainTitle { 
-    font-size: 20px; 
-    font-weight: bold; 
-    color: #f77965; 
-    padding: 10px;
-}
-
-QLabel#SubTitle { 
-    font-size: 13px; 
-    color: #8fa3b2; 
-    padding-left: 10px;
-}
-
-/* Cards Flutuantes */
-QFrame#Card { 
-    background-color: #ffffff; 
-    border-radius: 12px; 
-    border: none;
-}
-
-QLabel#CardTitle { 
-    font-size: 16px; 
-    font-weight: bold; 
-    color: #2d4157; 
-}
-
-/* Botões de Navegação (Sidebar) */
-QPushButton#NavBtn {
-    background-color: transparent;
-    color: #ffffff;
-    text-align: left;
-    padding: 15px;
-    border: none;
-    font-size: 14px;
-    border-radius: 0px;
-}
-QPushButton#NavBtn:hover {
-    background-color: #3e5670;
-    border-left: 4px solid #f77965;
-}
-QPushButton#NavBtn:checked {
-    background-color: #3e5670;
-    border-left: 4px solid #f77965;
-    font-weight: bold;
-}
-
-/* Botão de Ação Coral */
-QPushButton#ActionBtn {
-    background-color: #f77965;
-    color: white;
-    border-radius: 8px;
-    padding: 12px;
-    font-weight: bold;
-    font-size: 13px;
-    border: none;
-}
-QPushButton#ActionBtn:hover {
-    background-color: #e66854;
-}
-QPushButton#ActionBtn:pressed {
-    background-color: #d45b49;
-}
-
-/* Tabelas */
-QTableWidget {
-    background-color: #ffffff;
-    gridline-color: #f0f0f0;
-    border-radius: 8px;
-    border: 1px solid #e0e0e0;
-}
-QHeaderView::section {
-    background-color: #2d4157;
-    color: white;
-    padding: 6px;
-    border: none;
-}
-
-/* Barra de Progresso */
-QProgressBar {
-    background-color: #e0e0e0;
-    color: white;
-    border-radius: 5px;
-    text-align: center;
-    height: 10px;
-}
-QProgressBar::chunk {
-    background-color: #f77965;
-    border-radius: 5px;
-}
-"""
 
 class AutomationWorker(QThread):
     finished = Signal(bool, str)
@@ -171,6 +96,28 @@ class FireApp(QMainWindow):
         
         self.content_layout.addWidget(self.pages)
         self.layout_geral.addWidget(self.content_area)
+
+    def apply_stylesheet(self):
+        """Lê o arquivo .qss e aplica na janela principal."""
+        if self.qss_path.exists():
+            with open(self.qss_path, "r", encoding="utf-8") as f:
+                style = f.read()
+                self.setStyleSheet(style)
+        else:
+            print(f"⚠️ Alerta: Arquivo de estilo não encontrado em {self.qss_path}")
+
+    def carregar_chamadas_ativas(self):
+        df = self.processor.process_latest_active_call()
+        
+        if df is not None:
+            # Cria o model com os dados novos
+            self.model = PandasModel(df)
+            # Aplica o model na tabela da interface
+            self.table_ativas.setModel(self.model)
+            # Ajusta a largura das colunas automaticamente
+            self.table_ativas.resizeColumnsToContents()
+        else:
+            print("Aviso: Nenhum dado disponível para exibição.")
 
     def setup_sidebar(self):
         sidebar = QFrame()
@@ -307,12 +254,12 @@ class FireApp(QMainWindow):
         layout = QVBoxLayout(page)
         
         header = QHBoxLayout()
-        header_title = QLabel("Pipeline de Dados (Medalhão)")
+        header_title = QLabel("Monitoramento: Chamadas Ativas (Silver)") # Ajuste no título
         header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
         
         btn_view = QPushButton("🔄 Atualizar Tabela")
         btn_view.setObjectName("ActionBtn")
-        btn_view.clicked.connect(self.load_silver_data)
+        btn_view.clicked.connect(self.carregar_chamadas_ativas) # Conectado ao seu novo método
         btn_view.setFixedWidth(180)
 
         header.addWidget(header_title)
@@ -322,8 +269,12 @@ class FireApp(QMainWindow):
         layout.addLayout(header)
         layout.addSpacing(10)
 
-        self.table = QTableWidget()
-        layout.addWidget(self.table)
+        # TROCA: Saída QTableWidget, Entrada QTableView
+        self.table_ativas = QTableView() 
+        self.table_ativas.setAlternatingRowColors(True)
+        self.table_ativas.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.table_ativas)
+        
         return page
 
     def switch_page(self, index):
@@ -350,9 +301,15 @@ class FireApp(QMainWindow):
     def on_automation_finished(self, success, message):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
+        
         if success:
-            self.status_msg.setText(f"✅ Sucesso: {message}")
+            self.status_msg.setText(f"✅ Extração Concluída! Processando dados...")
             self.status_msg.setStyleSheet("color: #27ae60; font-weight: bold;")
+            
+
+            self.carregar_chamadas_ativas() 
+            
+            self.switch_page(1) 
         else:
             self.status_msg.setText(f"❌ Falha: {message}")
             self.status_msg.setStyleSheet("color: #e74c3c; font-weight: bold;")

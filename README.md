@@ -46,6 +46,8 @@ cad-auto/
 │
 ├── data/                    # Armazenamento local (Ignorado pelo Git)
 │   ├── 01_bronze/           # Histórico bruto (2018-2026)
+│       └── active/     
+│       └── historical/     
 │   ├── 02_silver/           # Base unificada
 │   └── 03_gold/             # Agregações de indicadores
 │
