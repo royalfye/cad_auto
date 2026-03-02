@@ -1,152 +1,376 @@
-import os
 import sys
-import time
+import pandas as pd
 from pathlib import Path
 
-import pandas as pd
-import streamlit as st
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QLabel, QTabWidget, 
+                             QFrame, QProgressBar, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QSpacerItem, QSizePolicy, QGraphicsDropShadowEffect)
+from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtGui import QIcon, QFont, QColor
 
-# --- PATH CONFIGURATION ---
-current_dir = Path(__file__).resolve().parent  # cad-auto/src/interface
-src_root = current_dir.parent                 # cad-auto/src
-project_root = src_root.parent                # cad-auto
-
+# Configuração de Caminhos (Sua Lógica)
+current_dir = Path(__file__).resolve().parent
+src_root = current_dir.parent
 if str(src_root) not in sys.path:
     sys.path.append(str(src_root))
 
-BRONZE_DIR = project_root / "data" / "01_bronze"
-SILVER_DIR = project_root / "data" / "02_silver"
-
-# Importamos a CLASSE agora, seguindo a boa prática de encapsulamento
 from bot.cad_bot import CADAutomationBot
 from processing.data_handler import DataProcessor
 
-# --- UI CONSTANTS ---
-FIRE_DEPT_RED = "#d32f2f"
+# --- ESTILIZAÇÃO QSS MODERNA ---
+STYLE_SHEET = """
+QMainWindow { 
+    background-color: #f3f3f9; 
+}
 
-def apply_custom_styles():
-    """Applies Fire Department branding via CSS."""
-    st.markdown(f"""
-        <style>
-        .stButton>button {{ 
-            width: 100%; 
-            background-color: {FIRE_DEPT_RED}; 
-            color: white; 
-            border-radius: 5px; 
-        }}
-        .stTabs [data-baseweb="tab-list"] {{ gap: 24px; }}
-        .stTabs [data-baseweb="tab"] {{ 
-            height: 50px; 
-            white-space: pre-wrap; 
-            font-weight: bold; 
-        }}
-        </style>
-        """, unsafe_allow_html=True)
+/* Sidebar / Barra Lateral */
+#SideBar { 
+    background-color: #2d4157; 
+    min-width: 250px; 
+    max-width: 250px;
+    border-right: 1px solid #d0d0d0;
+}
 
-def main():
-    # Initialization
-    st.set_page_config(
-        page_title="Bombeiros - 2ª CIA Passos",
-        page_icon="🚒",
-        layout="wide",
-    )
-    apply_custom_styles()
-    
-    # Instanciamos os objetos necessários
-    processor = DataProcessor()
-    bot = CADAutomationBot()
+/* Títulos */
+QLabel#MainTitle { 
+    font-size: 20px; 
+    font-weight: bold; 
+    color: #f77965; 
+    padding: 10px;
+}
 
-    # Sidebar & Header
-    st.title("🚒 Gestão de Ocorrências - 2ª CIA Passos")
-    st.sidebar.header("📍 Localidade")
-    st.sidebar.info("Unidade: 2ª CIA - PASSOS")
-    st.divider()
+QLabel#SubTitle { 
+    font-size: 13px; 
+    color: #8fa3b2; 
+    padding-left: 10px;
+}
 
-    # Tabs definition
-    extraction_tab, processing_tab, dashboard_tab = st.tabs([
-        "📥 Extração (CAD)", 
-        "⚙️ Processamento (Medalhão)", 
-        "📊 Visualização"
-    ])
+/* Cards Flutuantes */
+QFrame#Card { 
+    background-color: #ffffff; 
+    border-radius: 12px; 
+    border: none;
+}
 
-# --- TAB 1: EXTRACTION ---
-    with extraction_tab:
-        st.subheader("Extração Automatizada de Ocorrências")
-        st.info("Selecione o tipo de extração desejada. Certifique-se de que o CAD está aberto.")
+QLabel#CardTitle { 
+    font-size: 16px; 
+    font-weight: bold; 
+    color: #2d4157; 
+}
 
-        col_hist, col_act = st.columns(2)
+/* Botões de Navegação (Sidebar) */
+QPushButton#NavBtn {
+    background-color: transparent;
+    color: #ffffff;
+    text-align: left;
+    padding: 15px;
+    border: none;
+    font-size: 14px;
+    border-radius: 0px;
+}
+QPushButton#NavBtn:hover {
+    background-color: #3e5670;
+    border-left: 4px solid #f77965;
+}
+QPushButton#NavBtn:checked {
+    background-color: #3e5670;
+    border-left: 4px solid #f77965;
+    font-weight: bold;
+}
 
-        with col_hist:
-            st.write("### 📜 Dados Históricos")
-            st.caption("Extrai chamadas classificadas dos últimos 3 meses.")
-            if st.button("🚀 Sincronizar Histórico", key="btn_hist"):
-                with st.status("Executando extração histórica...", expanded=True) as status:
-                    # Passamos a raiz da bronze
-                    success = bot.run_full_extraction_flow(processor.bronze_path, status)
-                    if success:
-                        status.update(label="Histórico Sincronizado!", state="complete")
-                        st.success("Dados salvos em bronze/historical/")
-                    else:
-                        status.update(label="Falha no Processo", state="error")
+/* Botão de Ação Coral */
+QPushButton#ActionBtn {
+    background-color: #f77965;
+    color: white;
+    border-radius: 8px;
+    padding: 12px;
+    font-weight: bold;
+    font-size: 13px;
+    border: none;
+}
+QPushButton#ActionBtn:hover {
+    background-color: #e66854;
+}
+QPushButton#ActionBtn:pressed {
+    background-color: #d45b49;
+}
 
-        with col_act:
-            st.write("### 🚨 Chamadas Ativas")
-            st.caption("Extrai as ocorrências em andamento (Tempo Real).")
-            if st.button("🔴 Monitorar Ativas", key="btn_active"):
-                with st.status("Capturando chamadas em aberto...", expanded=True) as status:
-                    success = bot.run_active_extraction_flow(processor.bronze_path, status)
-                    if success:
-                        status.update(label="Ativas Capturadas!", state="complete")
-                        st.success("Dados salvos em bronze/active/")
-                    else:
-                        status.update(label="Falha na Captura", state="error")
-# --- TAB 2: PROCESSING ---
-    with processing_tab:
-        st.subheader("Pipeline de Dados")
+/* Tabelas */
+QTableWidget {
+    background-color: #ffffff;
+    gridline-color: #f0f0f0;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+QHeaderView::section {
+    background-color: #2d4157;
+    color: white;
+    padding: 6px;
+    border: none;
+}
+
+/* Barra de Progresso */
+QProgressBar {
+    background-color: #e0e0e0;
+    color: white;
+    border-radius: 5px;
+    text-align: center;
+    height: 10px;
+}
+QProgressBar::chunk {
+    background-color: #f77965;
+    border-radius: 5px;
+}
+"""
+
+class AutomationWorker(QThread):
+    finished = Signal(bool, str)
+    def __init__(self, bot_function, *args):
+        super().__init__()
+        self.bot_function = bot_function
+        self.args = args
+
+    def run(self):
+        try:
+            success = self.bot_function(*self.args)
+            self.finished.emit(success, "Processo concluído com sucesso!")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+class FireApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.processor = DataProcessor()
+        self.bot = CADAutomationBot()
         
-        # Métricas dinâmicas (Exemplo de como deixar sênior)
-        m_col1, m_col2, m_col3 = st.columns(3)
+        self.setWindowTitle("Bombeiros - 2ª CIA Passos")
+        self.resize(1200, 800)
+        self.setStyleSheet(STYLE_SHEET)
         
-        # Contagem de arquivos na bronze
-        bronze_files_count = len(list(BRONZE_DIR.glob("*.csv")))
-        m_col1.metric("Arquivos na Bronze", bronze_files_count)
-        m_col2.metric("Camada Silver", "Standardized")
-        m_col3.metric("Camada Gold", "Ready")
-        
-        st.divider()
+        # Layout Principal (Horizontal: Sidebar + Content)
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        self.layout_geral = QHBoxLayout(main_widget)
+        self.layout_geral.setContentsMargins(0, 0, 0, 0)
+        self.layout_geral.setSpacing(0)
 
-        st.write("### 📂 Gerenciamento do Histórico")
-        col_btn1, col_btn2 = st.columns(2)
+        self.setup_sidebar()
         
-        with col_btn1:
-            if st.button("Force Re-sync (Bronze -> Silver)"):
-                with st.spinner("Reprocessando todo o histórico..."):
-                    df_master = processor.consolidate_historical_data()
-                    st.success(f"Sincronização concluída: {len(df_master)} registros.")
+        # Área de Conteúdo (Vertical: Header + MainContent)
+        self.content_area = QWidget()
+        self.content_layout = QVBoxLayout(self.content_area)
+        self.content_layout.setContentsMargins(30, 30, 30, 30)
+        self.content_layout.setSpacing(20)
+        
+        # Stacked Widget para simular as abas
+        self.pages = QTabWidget()
+        self.pages.tabBar().hide() # Esconde as abas originais do Qt
+        
+        self.setup_pages()
+        
+        self.content_layout.addWidget(self.pages)
+        self.layout_geral.addWidget(self.content_area)
 
-        st.divider()
-        st.write("### 🔍 Inspeção da Camada Silver")
+    def setup_sidebar(self):
+        sidebar = QFrame()
+        sidebar.setObjectName("SideBar")
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header da Sidebar (Branding)
+        brand_frame = QFrame()
+        brand_layout = QVBoxLayout(brand_frame)
+        brand_layout.setContentsMargins(20, 40, 20, 40)
         
-        # Em vez de ler o CSV aqui, usamos o processor
-        master_silver_path = SILVER_DIR / "master_historic_silver.csv"
+        title = QLabel("🚒 GESTÃO\nCAD PASSOS")
+        title.setObjectName("MainTitle")
+        title.setWordWrap(True)
+        brand_layout.addWidget(title)
         
-        if master_silver_path.exists():
-            if st.button("Visualizar Tabela Master"):
-                # O ideal é criar um método processor.load_silver_data() no futuro
-                df_view = pd.read_csv(master_silver_path)
-                st.write(f"Exibindo {df_view.shape[0]} registros únicos.")
-                st.dataframe(df_view, width='stretch') # Corrigido para 'stretch'
+        layout.addWidget(brand_frame)
+
+        # Botões de Navegação
+        self.btn_extracao = QPushButton("  📥 Extração (CAD)")
+        self.btn_extracao.setObjectName("NavBtn")
+        self.btn_extracao.setCheckable(True)
+        self.btn_extracao.setChecked(True)
+        self.btn_extracao.clicked.connect(lambda: self.switch_page(0))
+
+        self.btn_process = QPushButton("  ⚙️ Processamento")
+        self.btn_process.setObjectName("NavBtn")
+        self.btn_process.setCheckable(True)
+        self.btn_process.clicked.connect(lambda: self.switch_page(1))
+
+        layout.addWidget(self.btn_extracao)
+        layout.addWidget(self.btn_process)
+        layout.addStretch()
+
+        # Rodapé Sidebar
+        status_lbl = QLabel("V 1.2.0 | Ativo")
+        status_lbl.setStyleSheet("color: #6a8296; padding: 20px; font-size: 11px;")
+        layout.addWidget(status_lbl)
+
+        self.layout_geral.addWidget(sidebar)
+
+    def setup_pages(self):
+        self.pages.addTab(self.create_extraction_page(), "Extração")
+        self.pages.addTab(self.create_processing_page(), "Processamento")
+
+    def create_extraction_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        
+        info_header = QLabel("Módulos de Extração")
+        info_header.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
+        layout.addWidget(info_header)
+
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(20)
+
+        # Card 1: Histórico
+        hist_card = self.create_modern_card(
+            "📜 Histórico de Dados", 
+            "Captura ocorrências finalizadas dos últimos 90 dias para base silver.", 
+            "Sincronizar Histórico", 
+            self.run_historical_sync
+        )
+        
+        # Card 2: Ativas
+        active_card = self.create_modern_card(
+            "🚨 Ocorrências Ativas", 
+            "Captura chamadas em andamento no tempo real para o monitoramento.", 
+            "Monitorar Ativas", 
+            self.run_active_sync
+        )
+
+        cards_layout.addWidget(hist_card)
+        cards_layout.addWidget(active_card)
+        layout.addLayout(cards_layout)
+
+        # Feedback de Status
+        self.status_frame = QFrame()
+        self.status_frame.setObjectName("Card")
+        self.status_frame.setVisible(False)
+        st_layout = QVBoxLayout(self.status_frame)
+        
+        self.status_msg = QLabel("Pronto para iniciar...")
+        self.status_msg.setStyleSheet("font-weight: bold; color: #2d4157;")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        
+        st_layout.addWidget(self.status_msg)
+        st_layout.addWidget(self.progress_bar)
+        
+        layout.addSpacing(20)
+        layout.addWidget(self.status_frame)
+        layout.addStretch()
+        return page
+
+    def create_modern_card(self, title, desc, btn_txt, callback):
+        frame = QFrame()
+        frame.setObjectName("Card")
+        frame.setMinimumHeight(220)
+        
+        # Efeito de Sombra (Moderno)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 30))
+        frame.setGraphicsEffect(shadow)
+
+        vbox = QVBoxLayout(frame)
+        vbox.setContentsMargins(25, 25, 25, 25)
+
+        t = QLabel(title)
+        t.setObjectName("CardTitle")
+        
+        d = QLabel(desc)
+        d.setWordWrap(True)
+        d.setStyleSheet("color: #6a8296; font-size: 13px; line-height: 18px;")
+
+        btn = QPushButton(btn_txt)
+        btn.setObjectName("ActionBtn")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(callback)
+
+        vbox.addWidget(t)
+        vbox.addWidget(d)
+        vbox.addStretch()
+        vbox.addWidget(btn)
+        return frame
+
+    def create_processing_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        
+        header = QHBoxLayout()
+        header_title = QLabel("Pipeline de Dados (Medalhão)")
+        header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
+        
+        btn_view = QPushButton("🔄 Atualizar Tabela")
+        btn_view.setObjectName("ActionBtn")
+        btn_view.clicked.connect(self.load_silver_data)
+        btn_view.setFixedWidth(180)
+
+        header.addWidget(header_title)
+        header.addStretch()
+        header.addWidget(btn_view)
+        
+        layout.addLayout(header)
+        layout.addSpacing(10)
+
+        self.table = QTableWidget()
+        layout.addWidget(self.table)
+        return page
+
+    def switch_page(self, index):
+        self.pages.setCurrentIndex(index)
+        self.btn_extracao.setChecked(index == 0)
+        self.btn_process.setChecked(index == 1)
+
+    # --- LÓGICA DE EXECUÇÃO (MANTIDA) ---
+    def run_historical_sync(self):
+        self.start_automation(self.bot.run_full_extraction_flow, self.processor.bronze_path, None)
+
+    def run_active_sync(self):
+        self.start_automation(self.bot.run_active_extraction_flow, self.processor.bronze_path, None)
+
+    def start_automation(self, func, *args):
+        self.status_frame.setVisible(True)
+        self.status_msg.setText("🤖 Bot em ação: Executando no CAD...")
+        self.status_msg.setStyleSheet("color: #f77965; font-weight: bold;")
+        
+        self.worker = AutomationWorker(func, *args)
+        self.worker.finished.connect(self.on_automation_finished)
+        self.worker.start()
+
+    def on_automation_finished(self, success, message):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        if success:
+            self.status_msg.setText(f"✅ Sucesso: {message}")
+            self.status_msg.setStyleSheet("color: #27ae60; font-weight: bold;")
         else:
-            st.warning("A base unificada ainda não foi gerada. Inicie uma extração ou force a sincronização.")
+            self.status_msg.setText(f"❌ Falha: {message}")
+            self.status_msg.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
-    # --- TAB 3: DASHBOARD ---
-    with dashboard_tab:
-        st.subheader("Indicadores")
-        chart_data = pd.DataFrame({
-            "Mês": ["Jan", "Fev", "Mar", "Abr"],
-            "Ocorrências": [45, 32, 58, 41]
-        }).set_index("Mês")
-        st.area_chart(chart_data, color=FIRE_DEPT_RED)
+    def load_silver_data(self):
+        path = self.processor.silver_path / "master_historic_silver.csv"
+        if path.exists():
+            df = pd.read_csv(path).head(100)
+            self.table.setColumnCount(len(df.columns))
+            self.table.setRowCount(len(df.index))
+            self.table.setHorizontalHeaderLabels(df.columns)
+            for i in range(len(df.index)):
+                for j in range(len(df.columns)):
+                    self.table.setItem(i, j, QTableWidgetItem(str(df.iloc[i, j])))
+            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    window = FireApp()
+    window.show()
+    sys.exit(app.exec())

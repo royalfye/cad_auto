@@ -1,27 +1,17 @@
 import os
-from pathlib import Path
 import time
 import logging
 import psutil
 import pygetwindow as gw
 import pyautogui
 import win32com.client
+import win32gui
+import win32con
 import pythoncom
 from pathlib import Path
 from datetime import datetime
 
-# Get the path of this file (ex: src/interface/app.py)
-current_file = Path(__file__).resolve()
-
-# Go to levels up until the root (cad-auto/)
-project_root = current_file.parent.parent.parent 
-
-# Define the path safe and sound
-BRONZE_PATH = project_root / "data" / "01_bronze"
-SILVER_PATH = project_root / "data" / "02_silver"
-GOLD_PATH   = project_root / "data" / "03_gold"
-
-# Global Config
+# Configuração de Logs
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -29,71 +19,102 @@ logging.basicConfig(
 
 class CADAutomationBot:
     def __init__(self):
-        # 1. Path Management (Single Source of Truth)
-        # current_file: src/bot/cad_bot.py
         self.bot_dir = Path(__file__).resolve().parent
         self.project_root = self.bot_dir.parent.parent
-        
-        # Assets path using the root
         self.assets_path = self.project_root / "assets" / "images" / "cad_targets"
         
-        # 2. Application Constants
         self.cad_title = "CAD - Solução de Controle do Atendimento e Despacho de Emergência Policial e de Bombeiros"
         self.excel_process = "EXCEL.EXE"
         
-        # 3. PyAutoGUI Settings
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.2
 
-    def run_full_extraction_flow(self, bronze_root: Path, ui_status) -> bool:
-        """
-        Orchestrates the complete RPA sequence for HISTORICAL data.
-        """
+    def _log_status(self, ui_status, message=None):
+    # Lógica inteligente para detectar se você esqueceu o ui_status
+        if message is None:
+            message = ui_status  # O texto estava no primeiro parâmetro
+            ui_status = None     # Não temos objeto de UI nesse caso
+    
+    # 1. Sempre loga no terminal (Bom para debug)
+        logging.info(message) 
+        
+        # 2. Se tiver UI (Streamlit), tenta escrever nela
+        if ui_status is not None:
+            if hasattr(ui_status, 'write'):
+                ui_status.write(message)
+
+    def run_full_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
         try:
-            # Close all Excel processes
-            ui_status.write("🧹 Encerrando instâncias do Excel...")
+            self._log_status(ui_status, "🧹 Encerrando instâncias do Excel...")
             self.close_excel_processes()
-            # Focus on Cad Window
-            ui_status.write("🔍 Localizando janela do CAD...")
-            if not self.focus_cad_window():
-                return False
-            # Check if it is selected on Passos city
-            ui_status.write("✅ Verificando filtros iniciais...")
-            if not self.check_passos_filter():
-                return False
-            # Click on calls_button.pnq in assets folder
-            ui_status.write("🖱️ Navegando pelos módulos...")
+            
+            self._log_status(ui_status, "🔍 Localizando janela do CAD...")
+            if not self.focus_cad_window(): return False
+            
+            self._log_status(ui_status, "✅ Verificando filtros iniciais...")
+            if not self.check_passos_filter(): return False
+            
+            self._log_status(ui_status, "🖱️ Navegando pelos módulos...")
             if not self.click_calls_button(): return False
             time.sleep(1)
             
-            # Sequence for historical/classified calls
             if not self.click_search_button(): return False
             if not self.click_classified_button(): return False
             if not self.click_last_24h_button(): return False
             if not self.click_last_3_months_button(): return False
             
-            ui_status.write("✍️ Filtrando cidade: Passos...")
+            self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
             if not self.filter_by_city_name("passos"): return False
 
-            ui_status.write("📤 Exportando para Excel...")
+            self._log_status(ui_status, "📤 Exportando para Excel...")
             if not self.click_export_button(): return False
 
-            # --- AJUSTE AQUI ---
-            # Chamamos a função passando a raiz da bronze e o tipo 'historical'
-            ui_status.write("💾 Capturando dados do Excel via COM...")
+            self._log_status(ui_status, "💾 Capturando dados do Excel via COM...")
             if not self.save_excel_export(bronze_root, extraction_type="historical"):
                 return False
             
-            ui_status.write("🧹 Limpando janelas residuais...")
+            self._log_status(ui_status, "🧹 Limpando janelas residuais...")
             self.close_search_subwindow()
-            
-            # Final focus for user experience
             self.focus_cad_window()
-
             return True
 
         except Exception as e:
             logging.error(f"Critical error in historical extraction flow: {e}")
+            return False
+        
+    def run_active_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
+        try:
+            self._log_status(ui_status, "🧹 Encerrando instâncias do Excel...")
+            self.close_excel_processes()
+
+            self._log_status(ui_status, "🔍 Localizando janela do CAD...")
+            if not self.focus_cad_window(): return False
+
+            self._log_status(ui_status, "✅ Verificando filtros iniciais...")
+            if not self.check_passos_filter(): return False
+
+            self._log_status(ui_status, "🖱️ Navegando pelos módulos...")
+            if not self.click_calls_button(): return False
+            time.sleep(1)
+            
+            if not self.click_search_button(): return False
+            if not self.click_active_button(): return False
+            
+            self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
+            if not self.filter_by_city_name("passos"): return False
+            
+            self._log_status(ui_status, "📤 Exportando chamadas ativas...")
+            if not self.click_export_button(): return False
+
+            if not self.save_excel_export(bronze_root, extraction_type="active"):
+                return False
+            
+            self._log_status(ui_status, "🧹 Limpando janelas residuais...")
+            self.close_search_subwindow()
+            self.focus_cad_window()
+            return True
+        except Exception as e:
+            logging.error(f"Error in active flow: {e}")
             return False
         
     def run_active_extraction_flow(self, bronze_root: Path, ui_status) -> bool:
@@ -101,35 +122,35 @@ class CADAutomationBot:
         Orchestrates the RPA sequence for ACTIVE (real-time) calls.
         """
         try:
-            ui_status.write("🧹 Encerrando instâncias do Excel...")
+            self._log_status("🧹 Encerrando instâncias do Excel...")
             self.close_excel_processes()
 
-            ui_status.write("🔍 Localizando janela do CAD...")
+            self._log_status("🔍 Localizando janela do CAD...")
             if not self.focus_cad_window():
                 return False
 
-            ui_status.write("✅ Verificando filtros iniciais...")
+            self._log_status("✅ Verificando filtros iniciais...")
             if not self.check_passos_filter():
                 return False
 
-            ui_status.write("🖱️ Navegando pelos módulos...")
+            self._log_status("🖱️ Navegando pelos módulos...")
             if not self.click_calls_button(): return False
             time.sleep(1)
             
             # Sequence for historical/classified calls
             if not self.click_search_button(): return False
             if not self.click_active_button(): return False
-            ui_status.write("✍️ Filtrando cidade: Passos...")
+            self._log_status("✍️ Filtrando cidade: Passos...")
             if not self.filter_by_city_name("passos"): return False
             
-            ui_status.write("📤 Exportando chamadas ativas...")
+            self._log_status("📤 Exportando chamadas ativas...")
             if not self.click_export_button(): return False
 
             # Chamamos a MESMA função de salvamento, mas com a flag 'active'
             if not self.save_excel_export(bronze_root, extraction_type="active"):
                 return False
             
-            ui_status.write("🧹 Limpando janelas residuais...")
+            self._log_status("🧹 Limpando janelas residuais...")
             self.close_search_subwindow()
             
             # Final focus for user experience
@@ -234,55 +255,41 @@ class CADAutomationBot:
         return closed_count
 
     def focus_cad_window(self) -> bool:
-        """
-        Locates, restores, maximizes, and brings the CAD window to the foreground.
-        Uses Alt-key precedence to bypass Windows Foreground Lock.
-        """
-        try:
-            windows = gw.getWindowsWithTitle(self.cad_title)
-            
-            if not windows:
-                logging.warning(f"Window not found: {self.cad_title}")
-                return False
-            
-            cad_window = windows[0]
 
-            # 1. Handle Minimized State
-            if cad_window.isMinimized:
-                logging.info("CAD window is minimized. Restoring...")
-                cad_window.restore()
+        try:
+            # 1. Localiza o 'Handle' (ID único) da janela pelo título
+            hwnd = win32gui.FindWindow(None, self.cad_title)
+            
+            if not hwnd:
+                logging.warning(f"Janela não encontrada: {self.cad_title}")
+                return False
+
+            # 2. Se a janela estiver minimizada, restaura
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 time.sleep(0.5)
 
-            # 2. Handle Maximize State (with Error 0 suppression)
-            if not cad_window.isMaximized:
-                try:
-                    cad_window.maximize()
-                    time.sleep(0.5)
-                except Exception as e:
-                    if "Error code 0" not in str(e):
-                        logging.debug(f"Maximize adjustment info: {e}")
-
-            # 3. Force Foreground Focus
-            # We send an 'Alt' key press to signal Windows that a focus change is coming
+            # 3. Força a janela a ficar no topo e maximizada
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            
+            # 4. TRUQUE DE MESTRE: Simula um 'Alt' antes de dar o SetForegroundWindow
+            # O Windows permite trocar o foco se o usuário pressionou Alt recentemente.
             pyautogui.press('alt')
             
-            try:
-                cad_window.activate()
-                logging.info("CAD window activated.")
-            except Exception as e:
-                # If activate still fails to bring it front, we try a fallback click
-                if "Error code 0" in str(e):
-                    logging.info("CAD window was already focused.")
-                else:
-                    logging.warning(f"Focus challenge detected, using fallback click: {e}")
-                    # Clicks on the top bar (X: 100px from left, Y: 10px from top)
-                    pyautogui.click(cad_window.left + 100, cad_window.top + 10)
-
-            logging.info("CAD window is now focused and in foreground.")
+            win32gui.SetForegroundWindow(hwnd)
+            
+            # 5. Clique de segurança na barra de título (garante foco do teclado)
+            # Pegamos a posição da janela para clicar em um lugar neutro
+            rect = win32gui.GetWindowRect(hwnd)
+            x = rect[0] + 200 # 200px da esquerda
+            y = rect[1] + 10  # 10px do topo
+            pyautogui.click(x, y)
+            
+            logging.info("Janela do CAD focada com sucesso via Win32 API.")
             return True
 
         except Exception as e:
-            logging.error(f"Critical failure during window focusing: {e}")
+            logging.error(f"Falha crítica ao focar janela: {e}")
             return False
         
     def click_calls_button(self) -> bool:
