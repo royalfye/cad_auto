@@ -1,84 +1,94 @@
 import pandas as pd
-import os
+import logging
 from pathlib import Path
+from typing import Optional
+
+# Configuração de logs para sabermos o que o robô está fazendo
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DataProcessor:
     """
-    Class responsible for the Data Medallion Structure (Bronze -> Silver -> Gold).
+    Responsável por transformar dados brutos (Bronze) em dados limpos (Silver).
     """
+    
     def __init__(self):
-        # Path definitions using pathlib for Windows compatibility
-        self.base_path = Path("data")
-        self.bronze_path = self.base_path / "01_bronze"
-        self.silver_path = self.base_path / "02_silver"
-        self.gold_path = self.base_path / "03_gold"
+        # 1. Define a Raiz do Projeto
+        self.root = Path(__file__).resolve().parent.parent.parent
+        
+        # 2. Define a estrutura Medalhão (Bronze -> Silver)
+        # Criamos a bronze_path como base para evitar o erro de AttributeError
+        self.bronze_path = self.root / "data" / "01_bronze"
+        self.path_bronze_active = self.bronze_path / "active"
+        self.path_bronze_historical = self.bronze_path / "historical"
+        
+        self.path_silver = self.root / "data" / "02_silver"
+        
+        # 3. Mapeamento de colunas (Mantido conforme seu padrão)
+        self.column_map = {
+            "Nº chamada": "call_id",
+            "Nº REDS": "reds_id",
+            "Data/hora de criação": "created_at",
+            "Local do fato": "address",
+            "Natureza": "nature",
+            "Unidade Responsável": "unit",
+            "Situação": "status",
+            "Data/hora da situação atual": "updated_at"
+        }
+        
+        # 4. Garante que TODA a estrutura de pastas exista
+        # Isso evita erros de "Pasta não encontrada" na primeira execução
+        self.path_bronze_active.mkdir(parents=True, exist_ok=True)
+        self.path_bronze_historical.mkdir(parents=True, exist_ok=True)
+        self.path_silver.mkdir(parents=True, exist_ok=True)
 
-    def consolidate_historical_data(self):
+    def process_latest_active_call(self) -> Optional[pd.DataFrame]:
         """
-        Scans all subfolders in Bronze, merges all CSVs, and saves a master silver file.
+        Lê o arquivo mais recente da pasta 'active' e limpa os dados.
         """
-        dataframes_list = []
+        # 1. Localizar arquivos
+        files = list(self.path_bronze_active.glob("*.csv"))
+        if not files:
+            logging.warning("Nenhum arquivo CSV encontrado em 01_bronze/active")
+            return None
         
-        # Recursively find all CSV files
-        all_files = list(self.bronze_path.rglob("*.csv"))
-        
-        if not all_files:
-            raise FileNotFoundError("No CSV files found in the 01_bronze directory.")
+        # 2. Pegar o arquivo mais recente (pela data de modificação)
+        latest_file = max(files, key=lambda f: f.stat().st_mtime)
+        logging.info(f"Processando arquivo mais recente: {latest_file.name}")
 
-        for file_path in all_files:
-            try:
-                # Reading with specific encoding for Brazilian legacy systems
-                df = pd.read_csv(
-                    file_path, 
-                    encoding='latin1', 
-                    sep=';', 
-                    on_bad_lines='skip'
-                )
-                
-                # Metadata: track which file the data came from
-                df['source_file'] = file_path.name
-                dataframes_list.append(df)
-            except Exception as e:
-                print(f"Error reading file {file_path}: {e}")
+        try:
+            # 3. Leitura (usando o separador ; que você identificou)
+            df = pd.read_csv(latest_file, sep=';', encoding='latin1', on_bad_lines='skip')
+            
+            # 4. Seleção e Renomeação (Filtra apenas o que mapeamos acima)
+            # Usamos apenas as colunas que existem no CSV para evitar erro
+            existing_cols = [c for c in self.column_map.keys() if c in df.columns]
+            df_silver = df[existing_cols].rename(columns=self.column_map)
 
-        # Concatenate all data into a single DataFrame
-        master_df = pd.concat(dataframes_list, ignore_index=True)
-        
-        # Data Cleaning
-        master_df.columns = [col.strip() for col in master_df.columns]
-        master_df = master_df.drop_duplicates()
+            # 5. Limpeza de Tipos
+            # Converter datas para o formato padrão do Python
+            for col in ['created_at', 'updated_at']:
+                if col in df_silver.columns:
+                    df_silver[col] = pd.to_datetime(df_silver[col], dayfirst=True, errors='coerce')
 
-        # Save as Master Silver file
-        output_file = self.silver_path / "master_historic_silver.csv"
-        master_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-        
-        return master_df
+            # Limpar o ID da chamada (remover pontos/hifens se houver)
+            if 'call_id' in df_silver.columns:
+                df_silver['call_id'] = df_silver['call_id'].astype(str).str.replace(r'\D', '', regex=True)
 
-    def process_bronze_to_silver(self, file_name: str):
-        """
-        Processes a single raw CSV file from Bronze to Silver layer.
-        Used for incremental updates.
-        """
-        raw_file_path = self.bronze_path / file_name
-        
-        if not raw_file_path.exists():
-            raise FileNotFoundError(f"File {file_name} not found in Bronze layer.")
+            # 6. Salvar na Silver
+            output_path = self.path_silver / "active_calls_summary.csv"
+            df_silver.to_csv(output_path, index=False, encoding='utf-8-sig')
+            
+            logging.info(f"Sucesso! Dados salvos em: {output_path}")
+            return df_silver
 
-        # Read individual file
-        df = pd.read_csv(
-            raw_file_path, 
-            encoding='latin1', 
-            sep=';', 
-            on_bad_lines='skip'
-        )
+        except Exception as e:
+            logging.error(f"Falha ao processar dados: {e}")
+            return None
 
-        # Basic cleaning
-        df.columns = [col.strip() for col in df.columns]
-        df_clean = df.drop_duplicates()
-
-        # Save processed file
-        output_name = file_name.replace(".csv", "_silver.csv")
-        output_path = self.silver_path / output_name
-        df_clean.to_csv(output_path, index=False, encoding='utf-8-sig')
-        
-        return df_clean
+# Bloco de teste: Só roda se você executar este arquivo diretamente
+if __name__ == "__main__":
+    processor = DataProcessor()
+    resultado = processor.process_latest_active_call()
+    if resultado is not None:
+        print("\n--- Prévia dos Dados Processados ---")
+        print(resultado.head())
