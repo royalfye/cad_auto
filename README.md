@@ -32,6 +32,37 @@ O bot utiliza um fluxo de decisão em cascata para garantir estabilidade:
 3. **Validação**: Verifica via visão computacional se o filtro de chamadas está corretamente em "PASSOS".
 4. **Navegação**: Executa cliques sequenciais (passos 01 a 09) e inserção de texto para exportação de dados.
 
+## Pre-commit Hooks
+
+This project uses pre-commit to ensure code quality and automate certain tasks before commits. Pre-commit helps run checks and formatting automatically, preventing unformatted or problematic code from being committed.
+
+### Pre-commit Installation
+
+1. *Install pre-commit using pip:*
+
+   If you don’t have pre-commit installed yet, you can install it globally or within your project’s virtual environment:
+
+    bash
+    pip install pre-commit
+    
+
+2. *Install the pre-commit hooks in the repository:*
+
+   After installing pre-commit, you need to configure the hooks in the repository so that they are executed before commits:
+
+    bash
+    pre-commit install
+    
+
+   This command will create a Git hook that will automatically run pre-commit on all modified files whenever you make a commit.
+
+3. *Manually run the hooks (optional):*
+
+   If desired, you can manually run pre-commit on all project files to check and fix issues before making a commit:
+
+    bash
+    pre-commit run --all-files
+
 ## 🏗️ Estrutura do Projeto
 
 <details>
@@ -58,3 +89,4 @@ cad-auto/
 │
 ├── requirements.txt         # Dependências do projeto
 └── README.md                # Documentação
+
