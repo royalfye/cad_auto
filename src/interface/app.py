@@ -8,7 +8,7 @@ os.environ["QT_AUTOSCREENSCALEFACTOR"] = "1"
 
 # 1. Ambiente e Caminhos
 
-ROOT_DIR = Path(__file__).resolve().parent.parent 
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -22,13 +22,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-# 3. Seus Módulos (Garante que esses arquivos existam na pasta interface!)
-from bot.cad_bot import CADAutomationBot
-from processing.data_handler import DataProcessor
-from interface.styles import STYLE_SHEET
-from interface.models import PandasModel 
-from interface.workers import AutomationWorker 
-from interface.sidebar import SideBar
+# 3. Seus Módulos - PADRONIZE TUDO COM 'src.'
+from src.bot.cad_bot import CADAutomationBot
+from src.processing.data_handler import DataProcessor
+from src.interface.styles import STYLE_SHEET
+from src.interface.workers import AutomationWorker 
+from src.interface.sidebar import SideBar
+from src.processing.services import converter_dataframe_para_objetos
+from src.interface.table_model import OcorrenciaTableModel
 
 class FireApp(QMainWindow):
     def __init__(self):
@@ -161,13 +162,21 @@ class FireApp(QMainWindow):
         header_title = QLabel("Monitoramento: Chamadas Ativas")
         header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
         
-        btn_view = QPushButton("🔄 Atualizar Tabela")
+        # --- BOTÃO COPIAR ---
+        self.btn_copy = QPushButton("📋 Copiar para WhatsApp")
+        self.btn_copy.setObjectName("ActionBtn")
+        self.btn_copy.setStyleSheet("background-color: #25D366; color: white;") # Verde WhatsApp
+        self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
+        self.btn_copy.setFixedWidth(220)
+
+        btn_view = QPushButton("🔄 Atualizar")
         btn_view.setObjectName("ActionBtn")
         btn_view.clicked.connect(self.carregar_chamadas_ativas)
-        btn_view.setFixedWidth(180)
+        btn_view.setFixedWidth(120)
 
         header.addWidget(header_title)
         header.addStretch()
+        header.addWidget(self.btn_copy) # Adicionamos o novo botão
         header.addWidget(btn_view)
         
         layout.addLayout(header)
@@ -190,10 +199,33 @@ class FireApp(QMainWindow):
     def carregar_chamadas_ativas(self):
         df = self.processor.process_latest_active_call()
         if df is not None:
-            self.model = PandasModel(df)
+            # Degrau 2: Converte os dados
+            lista_objetos = converter_dataframe_para_objetos(df)
+            
+            # Degrau 3: Usa o novo Model focado em Objetos
+            self.model = OcorrenciaTableModel(lista_objetos)
             self.table_ativas.setModel(self.model)
+            
             self.table_ativas.resizeColumnsToContents()
-            self.table_ativas.setColumnWidth(0, 45)
+            self.table_ativas.setColumnWidth(0, 50)
+
+    def copiar_ocorrencia_selecionada(self):
+        index = self.table_ativas.currentIndex()
+        if not index.isValid():
+            # Opcional: mostrar mensagem que nada foi selecionado
+            return
+
+        # Pegamos o objeto diretamente do modelo
+        ocorrencia = self.model.ocorrencias[index.row()]
+        texto = ocorrencia.formatar_para_whatsapp()
+        
+        # Clipboard do sistema
+        QApplication.clipboard().setText(texto)
+        
+        # Dica de UX: Você pode mudar temporariamente o texto do botão
+        self.btn_copy.setText("✅ Copiado!")
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2000, lambda: self.btn_copy.setText("📋 Copiar para WhatsApp"))
 
     def run_historical_sync(self):
         self.start_automation(self.bot.run_full_extraction_flow, self.processor.bronze_path, None)
