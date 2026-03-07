@@ -26,7 +26,6 @@ class DataProcessor:
         # 3. Mapeamento de colunas (Mantido conforme seu padrão)
         self.column_map = {
             "Nº chamada": "call_id",
-            "Nº REDS": "reds_id",
             "Data/hora de criação": "created_at",
             "Local do fato": "address",
             "Natureza": "nature",
@@ -56,26 +55,45 @@ class DataProcessor:
         logging.info(f"Processando arquivo mais recente: {latest_file.name}")
 
         try:
-            # 3. Leitura (usando o separador ; que você identificou)
+            # 3. Leitura
             df = pd.read_csv(latest_file, sep=';', encoding='latin1', on_bad_lines='skip')
             
-            # 4. Seleção e Renomeação (Filtra apenas o que mapeamos acima)
-            # Usamos apenas as colunas que existem no CSV para evitar erro
+            # 4. Seleção e Renomeação
             existing_cols = [c for c in self.column_map.keys() if c in df.columns]
             df_silver = df[existing_cols].rename(columns=self.column_map)
 
             # 5. Limpeza de Tipos
-            # Converter datas para o formato padrão do Python
+            # Datas
             for col in ['created_at', 'updated_at']:
                 if col in df_silver.columns:
                     df_silver[col] = pd.to_datetime(df_silver[col], dayfirst=True, errors='coerce')
 
-            # Limpar o ID da chamada (remover pontos/hifens se houver)
+            # Limpeza da Natureza (Removendo o que vem após o parêntese)
+            if 'nature' in df_silver.columns:
+                df_silver['nature'] = df_silver['nature'].str.split('(').str[0].str.strip()
+
+            # Limpar o ID da chamada
             if 'call_id' in df_silver.columns:
                 df_silver['call_id'] = df_silver['call_id'].astype(str).str.replace(r'\D', '', regex=True)
 
+            # --- NOVA COLUNA DE ÍCONES (À ESQUERDA) ---
+            if 'status' in df_silver.columns:
+                status_map = {
+                    'Atribuída ao órgão': '🟢',
+                    'No local': '🔴',
+                    'Em controle': '⚪',
+                    'Terminada': '⚫',
+                    'À caminho': '🔵',
+                    'Despachada': '🟡',
+                    'Em retorno': '🟠'
+                }
+                # .get permite definir o padrão '🔴' caso o status não esteja na lista
+                icons = df_silver['status'].apply(lambda x: status_map.get(x, '🔴'))
+                df_silver.insert(0, 'status_indicator', icons)
+
             # 6. Salvar na Silver
             output_path = self.path_silver / "active_calls_summary.csv"
+            # Importante: salvar com encoding utf-8-sig para os emojis aparecerem no Excel
             df_silver.to_csv(output_path, index=False, encoding='utf-8-sig')
             
             logging.info(f"Sucesso! Dados salvos em: {output_path}")

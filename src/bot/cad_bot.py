@@ -1,15 +1,20 @@
-import os
-import time
+# 1. Imports
+# Python native imports
+from datetime import datetime
 import logging
-import psutil
-import pygetwindow as gw
-import pyautogui
-import win32com.client
-import win32gui
-import win32con
+import os
 import pythoncom
 from pathlib import Path
-from datetime import datetime
+import time
+
+# Third-part library
+import psutil
+import pyautogui
+import pygetwindow as gw
+import win32com.client
+from win32com.client import Dispatch
+import win32con
+import win32gui
 
 # Configuração de Logs
 logging.basicConfig(
@@ -18,302 +23,253 @@ logging.basicConfig(
 )
 
 class CADAutomationBot:
+
     def __init__(self):
+        # Paths
         self.bot_dir = Path(__file__).resolve().parent
         self.project_root = self.bot_dir.parent.parent
         self.assets_path = self.project_root / "assets" / "images" / "cad_targets"
         
+        # System config
         self.cad_title = "CAD - Solução de Controle do Atendimento e Despacho de Emergência Policial e de Bombeiros"
         self.excel_process = "EXCEL.EXE"
         
+        # Safety config for PyAutoGUI
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.2
 
     def _log_status(self, ui_status, message=None):
-    # Lógica inteligente para detectar se você esqueceu o ui_status
+
         if message is None:
-            message = ui_status  # O texto estava no primeiro parâmetro
-            ui_status = None     # Não temos objeto de UI nesse caso
+            message = ui_status
+            ui_status = None
     
-    # 1. Sempre loga no terminal (Bom para debug)
         logging.info(message) 
         
-        # 2. Se tiver UI (Streamlit), tenta escrever nela
-        if ui_status is not None:
-            if hasattr(ui_status, 'write'):
-                ui_status.write(message)
+        if ui_status is not None and hasattr(ui_status, 'write'):
+            ui_status.write(message)
 
+    # Main automation flux
+    def _base_extraction_flow(self, bronze_root: Path, extraction_type: str, ui_status=None) -> bool:
+        try:
+            self._log_status(ui_status, "🧹 Preparando ambiente...")
+            self.close_excel_processes()
+            
+            if not self.focus_cad_window(): return False
+            if not self.check_passos_filter(): return False
+            
+            self._log_status(ui_status, "🖱️ Navegando pelos módulos...")
+            if not self.click_calls_button(): return False
+            time.sleep(1)
+            
+            if not self.click_search_button(): return False
+
+            # Check if is active calls or historical
+            if extraction_type == "historical":
+                if not self.click_classified_button(): return False
+                if not self.click_last_24h_button(): return False
+                if not self.click_last_3_months_button(): return False
+            elif extraction_type == "active":
+                if not self.click_active_button(): return False
+            # ---------------------------------
+
+            self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
+            if not self.filter_by_city_name("passos"): return False
+
+            self._log_status(ui_status, f"📤 Exportando {extraction_type}...")
+            if not self.click_export_button(): return False
+
+            if not self.save_excel_export(bronze_root, extraction_type=extraction_type):
+                return False
+            
+            self._log_status(ui_status, "🧹 Limpando janelas residuais...")
+            self.close_search_subwindow()
+            self.focus_cad_window()
+            return True
+
+        except Exception as e:
+            logging.error(f"Erro no fluxo {extraction_type}: {e}")
+            return False
+        
     def run_full_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
-        try:
-            self._log_status(ui_status, "🧹 Encerrando instâncias do Excel...")
-            self.close_excel_processes()
-            
-            self._log_status(ui_status, "🔍 Localizando janela do CAD...")
-            if not self.focus_cad_window(): return False
-            
-            self._log_status(ui_status, "✅ Verificando filtros iniciais...")
-            if not self.check_passos_filter(): return False
-            
-            self._log_status(ui_status, "🖱️ Navegando pelos módulos...")
-            if not self.click_calls_button(): return False
-            time.sleep(1)
-            
-            if not self.click_search_button(): return False
-            if not self.click_classified_button(): return False
-            if not self.click_last_24h_button(): return False
-            if not self.click_last_3_months_button(): return False
-            
-            self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
-            if not self.filter_by_city_name("passos"): return False
+        return self._base_extraction_flow(bronze_root, "historical", ui_status)
 
-            self._log_status(ui_status, "📤 Exportando para Excel...")
-            if not self.click_export_button(): return False
-
-            self._log_status(ui_status, "💾 Capturando dados do Excel via COM...")
-            if not self.save_excel_export(bronze_root, extraction_type="historical"):
-                return False
-            
-            self._log_status(ui_status, "🧹 Limpando janelas residuais...")
-            self.close_search_subwindow()
-            self.focus_cad_window()
-            return True
-
-        except Exception as e:
-            logging.error(f"Critical error in historical extraction flow: {e}")
-            return False
-        
     def run_active_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
-        try:
-            self._log_status(ui_status, "🧹 Encerrando instâncias do Excel...")
-            self.close_excel_processes()
-
-            self._log_status(ui_status, "🔍 Localizando janela do CAD...")
-            if not self.focus_cad_window(): return False
-
-            self._log_status(ui_status, "✅ Verificando filtros iniciais...")
-            if not self.check_passos_filter(): return False
-
-            self._log_status(ui_status, "🖱️ Navegando pelos módulos...")
-            if not self.click_calls_button(): return False
-            time.sleep(1)
-            
-            if not self.click_search_button(): return False
-            if not self.click_active_button(): return False
-            
-            self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
-            if not self.filter_by_city_name("passos"): return False
-            
-            self._log_status(ui_status, "📤 Exportando chamadas ativas...")
-            if not self.click_export_button(): return False
-
-            if not self.save_excel_export(bronze_root, extraction_type="active"):
-                return False
-            
-            self._log_status(ui_status, "🧹 Limpando janelas residuais...")
-            self.close_search_subwindow()
-            self.focus_cad_window()
-            return True
-        except Exception as e:
-            logging.error(f"Error in active flow: {e}")
-            return False
+        return self._base_extraction_flow(bronze_root, "active", ui_status)
         
-    def run_active_extraction_flow(self, bronze_root: Path, ui_status) -> bool:
-        """
-        Orchestrates the RPA sequence for ACTIVE (real-time) calls.
-        """
-        try:
-            self._log_status("🧹 Encerrando instâncias do Excel...")
-            self.close_excel_processes()
-
-            self._log_status("🔍 Localizando janela do CAD...")
-            if not self.focus_cad_window():
-                return False
-
-            self._log_status("✅ Verificando filtros iniciais...")
-            if not self.check_passos_filter():
-                return False
-
-            self._log_status("🖱️ Navegando pelos módulos...")
-            if not self.click_calls_button(): return False
-            time.sleep(1)
-            
-            # Sequence for historical/classified calls
-            if not self.click_search_button(): return False
-            if not self.click_active_button(): return False
-            self._log_status("✍️ Filtrando cidade: Passos...")
-            if not self.filter_by_city_name("passos"): return False
-            
-            self._log_status("📤 Exportando chamadas ativas...")
-            if not self.click_export_button(): return False
-
-            # Chamamos a MESMA função de salvamento, mas com a flag 'active'
-            if not self.save_excel_export(bronze_root, extraction_type="active"):
-                return False
-            
-            self._log_status("🧹 Limpando janelas residuais...")
-            self.close_search_subwindow()
-            
-            # Final focus for user experience
-            self.focus_cad_window()
-
-            return True
-        except Exception as e:
-            logging.error(f"Error in active flow: {e}")
-            return False
-
     def save_excel_export(self, folder_path: Path, extraction_type: str = "historical") -> bool:
-        """
-        Saves the active Excel workbook as a CSV in the Bronze layer.
-        extraction_type: Can be 'active' or 'historical' to differentiate folders/files.
-        """
         pythoncom.CoInitialize()
+        excel = None
         
         try:
-            logging.info(f"Connecting to Excel via COM for {extraction_type} extraction...")
-            time.sleep(3) 
-            
-            excel = win32com.client.GetActiveObject("Excel.Application")
-            excel.DisplayAlerts = False 
+            logging.info("💾 Aguardando o Excel carregar...")
+            time.sleep(3)
 
-            workbook = excel.ActiveWorkbook
-            if not workbook:
-                logging.error("No active workbook found.")
+            # Forces the focus to unlock windows block
+            pyautogui.press('win')
+            time.sleep(0.2)
+            pyautogui.press('esc')
+
+            # Try to capture the excel instance that CAD opened
+            for _ in range(15): 
+                try:
+                    excel = win32com.client.GetActiveObject("Excel.Application")
+                    if excel.Workbooks.Count > 0:
+                        break
+                except Exception:
+                    time.sleep(1)
+
+            if not excel or excel.Workbooks.Count == 0:
+                logging.error("❌ Instância do Excel não encontrada ou sem planilhas.")
                 return False
 
-            # --- STEP: GENERATE FILENAME ---
-            # Format: 2026-03-01_14-30_active.csv
+            # Control Cofig
+            excel.Visible = True
+            excel.DisplayAlerts = False 
+            
+            # Windows variable for maximize function
+            xl_maximized = -4137
+            excel.WindowState = xl_maximized 
+
+            wb = excel.Workbooks(1)
+            
+            # Save file config
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
             filename = f"{timestamp}_{extraction_type}.csv"
-            
-            # Define target path (01_bronze/active/ or 01_bronze/historical/)
             target_dir = folder_path / extraction_type
             target_dir.mkdir(parents=True, exist_ok=True)
+            full_path = str(target_dir / filename)
+
+            logging.info(f"💾 Salvando: {filename}")
             
-            full_output_path = target_dir / filename
-
-            # SaveAs (FileFormat=6 is CSV)
-            workbook.SaveAs(str(full_output_path), FileFormat=6)
-            logging.info(f"Bronze layer updated: {full_output_path}")
-
-            workbook.Close(SaveChanges=False)
+            # FileFormat=6 is csv format
+            wb.SaveAs(full_path, FileFormat=6) 
+            
+            wb.Close(SaveChanges=False)
             excel.Quit()
+            
+            logging.info("✅ Extração concluída com sucesso!")
             return True
 
         except Exception as e:
-            logging.error(f"COM Automation failed: {e}")
+            logging.error(f"❌ Erro na captura do Excel: {e}")
             return False
         finally:
+            # Safety method to ends all excell processes
+            wb = None
+            excel = None
             pythoncom.CoUninitialize()
 
-
-
     def check_passos_filter(self) -> bool:
-        """
-        Searches for the 'Passos Filter' reference image on the screen.
-        Returns:
-            bool: True if found, False otherwise.
-        """
-        target_image = str(self.assets_path / "01_filter_passos_active.png")
-        
-        if not os.path.exists(target_image):
-            logging.error(f"Reference image not found at: {target_image}")
+        """Check if the filter Passos in on the screen."""
+
+        # Image check in assets folder
+        target_image = self.assets_path / "01_filter_passos_active.png"
+        if not target_image.exists():
+            logging.error(f"Imagem de referência não encontrada: {target_image}")
             return False
 
         try:
-            # confidence=0.9 requires opencv-python. 
-            # It allows 10% of variation (anti-aliasing, etc)
-            location = pyautogui.locateOnScreen(target_image, confidence=0.9)
+            # target the image file
+            location = pyautogui.locateOnScreen(str(target_image), confidence=0.9)
             
             if location:
-                logging.info("Filter 'PASSOS' is correctly selected.")
+                logging.info("✅ Filtro 'PASSOS' detectado com sucesso.")
                 return True
             
-            logging.warning("Filter 'PASSOS' NOT detected on screen.")
+            logging.warning("⚠️ Filtro 'PASSOS' não encontrado na tela.")
             return False
-
         except Exception as e:
-            logging.error(f"Error during image recognition: {e}")
+            logging.error(f"Erro no reconhecimento de imagem: {e}")
             return False
         
+    # Closes all execel processes
     def close_excel_processes(self) -> int:
-        """
-        Forcefully terminates any running Excel instances to prevent file locks.
-        Returns:
-            int: Number of closed processes.
-        """
         closed_count = 0
         for proc in psutil.process_iter(['name']):
             try:
                 if proc.info['name'] and proc.info['name'].upper() == self.excel_process:
-                    proc.terminate()
+                    proc.terminate() 
+                    try:
+                        proc.wait(timeout=0.5)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        
                     closed_count += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         
         if closed_count > 0:
-            logging.info(f"Cleaned up {closed_count} Excel process(es).")
+            logging.info(f"🧹 Limpeza: {closed_count} processo(s) do Excel encerrado(s).")
         return closed_count
 
+    # Focus Cad Window
     def focus_cad_window(self) -> bool:
-
         try:
-            # 1. Localiza o 'Handle' (ID único) da janela pelo título
             hwnd = win32gui.FindWindow(None, self.cad_title)
             
             if not hwnd:
-                logging.warning(f"Janela não encontrada: {self.cad_title}")
+                logging.warning(f"⚠️ Janela não encontrada: {self.cad_title}")
                 return False
 
-            # 2. Se a janela estiver minimizada, restaura
+            # if its minimized
             if win32gui.IsIconic(hwnd):
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 time.sleep(0.5)
 
-            # 3. Força a janela a ficar no topo e maximizada
+            # Maximizes
             win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
             
-            # 4. TRUQUE DE MESTRE: Simula um 'Alt' antes de dar o SetForegroundWindow
-            # O Windows permite trocar o foco se o usuário pressionou Alt recentemente.
+            # Bypass for Windows security
             pyautogui.press('alt')
             
-            win32gui.SetForegroundWindow(hwnd)
-            
-            # 5. Clique de segurança na barra de título (garante foco do teclado)
-            # Pegamos a posição da janela para clicar em um lugar neutro
+            # Try to bring it to the front
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception as e:
+                logging.warning(f"Tentativa inicial de foco falhou, tentando forçar: {e}")
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.SendKeys('%')
+                win32gui.SetForegroundWindow(hwnd)
+
+            # Clicks on relative position
             rect = win32gui.GetWindowRect(hwnd)
-            x = rect[0] + 200 # 200px da esquerda
-            y = rect[1] + 10  # 10px do topo
-            pyautogui.click(x, y)
+            center_x = rect[0] + (rect[2] - rect[0]) // 2
+            top_y = rect[1] + 15
+            pyautogui.click(center_x, top_y)
             
-            logging.info("Janela do CAD focada com sucesso via Win32 API.")
+            logging.info("🎯 Janela do CAD focada e pronta para interação.")
             return True
 
         except Exception as e:
-            logging.error(f"Falha crítica ao focar janela: {e}")
+            logging.error(f"❌ Falha crítica ao focar janela: {e}")
             return False
         
+    # Click on 'Chamadas'
     def click_calls_button(self) -> bool:
-        """
-        Searches for the calls button (02_chamadas_button.png) and clicks it.
-        Returns:
-            bool: True if clicked successfully, False otherwise.
-        """
+        """Busca o botão de chamadas e clica. Mantendo sua lógica original de clique direto."""
         target_image = str(self.assets_path / "02_chamadas_button.png")
         
         if not os.path.exists(target_image):
-            logging.error(f"Image not found: {target_image}")
+            logging.error(f"Imagem não encontrada: {target_image}")
             return False
 
         try:
-            # Localiza o centro da imagem na tela
-            button_location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-            
+            # Em vez de uma tentativa única, damos 5 segundos para o botão aparecer
+            button_location = None
+            for _ in range(5):
+                button_location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+                if button_location:
+                    break
+                time.sleep(1)
+
             if button_location:
+                # Volta para o seu clique direto e rápido que funcionava
                 pyautogui.click(button_location)
-                logging.info("Calls button (02) clicked successfully.")
+                logging.info("✅ Calls button (02) clicked successfully.")
                 return True
             
-            logging.warning("Calls button (02) not found on screen.")
+            logging.warning("⚠️ Calls button (02) not found on screen.")
             return False
 
         except Exception as e:

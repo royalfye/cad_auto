@@ -25,6 +25,24 @@ QLabel#SubTitle {
     padding-left: 10px;
 }
 
+/* Tabelas - Ajustado para QTableView (PandasModel) */
+QTableView {
+    background-color: #ffffff;
+    gridline-color: #f0f0f0;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    selection-background-color: #fceceb; /* Cor suave ao selecionar linha */
+    selection-color: #2d4157;
+}
+
+QHeaderView::section {
+    background-color: #2d4157;
+    color: white;
+    padding: 10px;
+    border: none;
+    font-weight: bold;
+}
+
 /* Cards Flutuantes */
 QFrame#Card { 
     background-color: #ffffff; 
