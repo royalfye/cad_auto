@@ -129,29 +129,85 @@ class HistoryBot(CADAutomationBot):
         self.logger.warning("⚠️ Botão do lápis não localizado.")
         return False
 
-    def capturar_historico_por_id(self, call_id: str, ui_status=None) -> str:
-        # 1. Prepara ambiente e foca CAD
-        if not self.preparar_ambiente_historico(ui_status):
-            return "Erro na preparação"
-
-        # 2. Localiza o ID e entra na ocorrência (Duplo Clique)
-        if not self.localizar_e_duplo_clique(call_id, ui_status):
-            return "ID não localizado"
-
-        # 3. Aguarda a janela de detalhes carregar
-        time.sleep(1.5)
-
-        # 4. Clica na aba de histórico
-        if not self.abrir_aba_historico(ui_status):
-            return "Falha ao abrir aba histórico"
-
-        # 5. NOVO DEGRAU: Clicar no botão do lápis
-        # Pequena pausa para garantir que o botão apareceu na aba
-        time.sleep(0.5)
-        if not self.clicar_botao_lapis(ui_status):
-            return "Falha ao clicar no lápis"
+    def extrair_dados_tabela_historico(self, ui_status=None) -> str:
+        """
+        Localiza a tabela e extrai o conteúdo usando a largura exata da âncora.
+        """
+        self._log_status(ui_status, "📊 Fazendo varredura na tabela...")
         
-        return "Sucesso até o botão do lápis"
+        # 1. Localiza a âncora
+        anchor_path = self.assets_path / "14_tabela_header.png"
+        anchor_loc = pyautogui.locateOnScreen(str(anchor_path), confidence=0.8)
+
+        if not anchor_loc:
+            return "Erro: Cabeçalho da tabela não encontrado."
+
+        # 2. Cálculo Dinâmico da Região
+        # ax, ay: posição superior esquerda / aw, ah: largura e altura da imagem
+        ax, ay, aw, ah = anchor_loc
+        
+        # Definimos a região: 
+        # x = posição inicial da imagem
+        # y = logo abaixo da imagem (ay + ah)
+        # largura = exatamente a largura da imagem (aw)
+        # altura = um valor que cubra a área de dados (ex: 500px ou até o fim da tela)
+        search_region = (ax, ay + ah, aw, 500) 
+
+        # 3. Captura Otimizada
+        screenshot = ImageGrab.grab(bbox=(
+            search_region[0], 
+            search_region[1], 
+            search_region[0] + search_region[2], 
+            search_region[1] + search_region[3]
+        )).convert('L')
+        
+        # 4. OCR de Parágrafo
+        # O EasyOCR vai ler as colunas da esquerda para a direita, linha por linha
+        img_np = np.array(screenshot)
+        resultados = self.reader.readtext(img_np, detail=0, paragraph=True)
+
+        return "\n".join(resultados) if resultados else "Nenhum dado extraído."
+
+    def capturar_historico_por_id(self, call_id: str, ui_status=None) -> str:
+        """Fluxo completo com garantia de fechamento de janelas."""
+        relato_completo = ""
+        
+        try:
+            # 1. Prepara ambiente e foca CAD
+            if not self.preparar_ambiente_historico(ui_status): 
+                return "Erro Foco"
+            
+            # 2. Busca e entra na ocorrência
+            if not self.localizar_e_duplo_clique(call_id, ui_status): 
+                return "Erro ID"
+            
+            time.sleep(1.5) 
+            
+            # 3. Navegação interna
+            if not self.abrir_aba_historico(ui_status): 
+                return "Erro Aba"
+            
+            time.sleep(0.5) 
+            
+            # 4. Acesso ao histórico detalhado
+            if not self.clicar_botao_lapis(ui_status): 
+                return "Erro Lápis"
+            
+            time.sleep(1.0) 
+            
+            # 5. EXTRAÇÃO FINAL (OCR)
+            relato_completo = self.extrair_dados_tabela_historico(ui_status)
+            
+            return relato_completo
+
+        except Exception as e:
+            self.logger.error(f"Falha crítica no fluxo: {e}")
+            return f"Erro: {e}"
+            
+        finally:
+            # 6. LIMPEZA GARANTIDA: Este bloco executa SEMPRE
+            # Chamamos o método que você atualizou para limpar o ambiente
+            self.fechar_subjanela_gestao(ui_status)
     
     def abrir_aba_historico(self, ui_status=None) -> bool:
         """
@@ -178,16 +234,46 @@ class HistoryBot(CADAutomationBot):
         
         self.logger.warning("⚠️ Não foi possível encontrar o botão de histórico.")
         return False
+    
+    def fechar_subjanela_gestao(self, ui_status=None) -> bool:
+        """
+        Força o fechamento das subjanelas usando Alt+F4.
+        """
+        self._log_status(ui_status, "🧹 Forçando fechamento das janelas (Alt+F4)...")
+        
+        try:
+            # 1. Garante o foco no CAD clicando no centro
+            screen_width, screen_height = pyautogui.size()
+            pyautogui.click(screen_width // 2, screen_height // 2)
+            time.sleep(0.5)
+
+            # 2. Primeiro Alt+F4: Fecha a 'Gestão de Histórico'
+            pyautogui.hotkey('alt', 'f4')
+            self.logger.info("Alt+F4 enviado para a Gestão de Histórico.")
+            
+            # Espera um pouco mais para o CAD processar
+            time.sleep(1.2) 
+            
+            # 3. Segundo Alt+F4 ou Esc: Fecha a ficha da Ocorrência
+            # Recomendo manter o ESC no segundo para ser mais seguro e não fechar o CAD principal
+            pyautogui.press('esc')
+            self.logger.info("Esc enviado para sair da ficha da Ocorrência.")
+            
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Erro no fechamento forçado: {e}")
+            return False
+
 
 if __name__ == "__main__":
     bot = HistoryBot()
-    id_teste = "2026444173299" 
+    id_teste = "2026444219810" 
     
-    print(f"🚀 Iniciando fluxo até o lápis para o ID: {id_teste}")
+    print(f"🚀 Iniciando extração final para o ID: {id_teste}")
     
-    resultado = bot.capturar_historico_por_id(id_teste)
+    texto_extraido = bot.capturar_historico_por_id(id_teste)
     
-    if "Sucesso" in resultado:
-        print(f"🔥 DEGRAU CONCLUÍDO: O robô chegou até o clique no lápis!")
-    else:
-        print(f"❌ Falha no processo: {resultado}")
+    print("\n--- CONTEÚDO CAPTURADO ---")
+    print(texto_extraido)
+    print("--------------------------")

@@ -30,6 +30,7 @@ from src.interface.workers import AutomationWorker
 from src.interface.sidebar import SideBar
 from src.processing.services import converter_dataframe_para_objetos
 from src.interface.table_model import OcorrenciaTableModel
+from src.bot.history_bot import HistoryBot
 
 class FireApp(QMainWindow):
     def __init__(self):
@@ -169,13 +170,23 @@ class FireApp(QMainWindow):
         self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
         self.btn_copy.setFixedWidth(220)
 
+        # --- BOTÃO EXTRAIR HISTÓRICO (Novo!) ---
+        self.btn_history = QPushButton("🔍 Buscar Histórico")
+        self.btn_history.setObjectName("ActionBtn")
+        self.btn_history.setStyleSheet("background-color: #2d4157; color: white;")
+        self.btn_history.setFixedWidth(180)
+        self.btn_history.clicked.connect(self.iniciar_busca_historico)
+
         btn_view = QPushButton("🔄 Atualizar")
         btn_view.setObjectName("ActionBtn")
         btn_view.clicked.connect(self.carregar_chamadas_ativas)
         btn_view.setFixedWidth(120)
 
+        
+
         header.addWidget(header_title)
         header.addStretch()
+        header.addWidget(self.btn_history) # Novo botão aqui
         header.addWidget(self.btn_copy) # Adicionamos o novo botão
         header.addWidget(btn_view)
         
@@ -226,12 +237,68 @@ class FireApp(QMainWindow):
         self.btn_copy.setText("✅ Copiado!")
         from PySide6.QtCore import QTimer
         QTimer.singleShot(2000, lambda: self.btn_copy.setText("📋 Copiar para WhatsApp"))
+    
+        # Adicione estes métodos à classe FireApp:
+
+    def iniciar_busca_historico(self):
+        """Gatilha o robô para buscar o relato no CAD."""
+        index = self.table_ativas.currentIndex()
+        if not index.isValid():
+            self.status_frame.setVisible(True)
+            self.status_msg.setText("⚠️ Selecione uma linha na tabela primeiro!")
+            return
+
+        # Pegamos o objeto Ocorrencia da linha selecionada
+        ocorrencia = self.model.ocorrencias[index.row()]
+        call_id = ocorrencia.id_chamada
+
+        # 1. Mostra feedback visual
+        self.status_frame.setVisible(True)
+        self.status_msg.setText(f"🤖 Indo buscar histórico do ID: {call_id}")
+        self.progress_bar.setRange(0, 0) # Efeito de 'carregando' infinito
+
+        # 2. Prepara o robô
+        self.h_bot = HistoryBot()
+        
+        # 3. Dispara via Worker (passando a função e o ID)
+        self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
+        
+        # Conecta o sinal de status para as mensagens do bot aparecerem na tela (opcional mas recomendado)
+        if hasattr(self.worker, 'status'):
+            self.worker.status.connect(lambda msg: self.status_msg.setText(msg))
+        
+        # Conecta o fim do processo
+        self.worker.finished.connect(lambda success, result: self.on_history_finished(success, result, ocorrencia))
+        self.worker.start()
+
+    def on_history_finished(self, success, result, ocorrencia):
+        """Processa o resultado do OCR e atualiza a interface."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        
+        if success:
+            # 'result' aqui é o texto que o OCR extraiu da tabela!
+            ocorrencia.historico = result
+            self.status_msg.setText("✅ Histórico capturado com sucesso!")
+            
+            # Notifica a tabela que o dado mudou (isso atualiza o texto se você tiver uma coluna de histórico)
+            self.model.layoutChanged.emit()
+            
+            # Mostra o que foi capturado em um pop-up simples para conferência
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Histórico Capturado", f"Relato extraído:\n\n{result}")
+        else:
+            self.status_msg.setText(f"❌ Falha no OCR: {result}")
+
+
 
     def run_historical_sync(self):
-        self.start_automation(self.bot.run_full_extraction_flow, self.processor.bronze_path, None)
+    # Remova o 'None' do final
+        self.start_automation(self.bot.run_full_extraction_flow, self.processor.bronze_path)
 
     def run_active_sync(self):
-        self.start_automation(self.bot.run_active_extraction_flow, self.processor.bronze_path, None)
+    # Remova o 'None' do final
+        self.start_automation(self.bot.run_active_extraction_flow, self.processor.bronze_path)
 
     def start_automation(self, func, *args):
         self.status_frame.setVisible(True)
