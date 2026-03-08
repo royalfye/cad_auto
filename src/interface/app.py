@@ -50,81 +50,28 @@ class FireApp(QMainWindow):
         self.layout_geral.setSpacing(0)
 
         # Peças da Interface
-        self.sidebar = SideBar(switch_page_callback=self.switch_page)
+        self.sidebar = SideBar(switch_page_callback=self.switch_page_dummy)
+        # Esconde os botões de navegação que não fazem mais sentido
+        self.sidebar.btn_extracao.hide()
+        self.sidebar.btn_process.hide()
         
         self.content_area = QWidget()
         self.content_layout = QVBoxLayout(self.content_area)
         self.content_layout.setContentsMargins(30, 30, 30, 30)
         self.content_layout.setSpacing(20)
 
-        self.pages = QTabWidget()
-        self.pages.tabBar().hide()
-        self.setup_pages() 
-
-        # Montagem
+        # Montagem Direta (Sem abas)
         self.layout_geral.addWidget(self.sidebar)
-        self.content_layout.addWidget(self.pages)
+        
+        # Criamos direto a página de processamento (que agora é a única)
+        self.monitor_page = self.create_processing_page()
+        self.content_layout.addWidget(self.monitor_page)
+        
         self.layout_geral.addWidget(self.content_area)
 
-    # --- LÓGICA DE NAVEGAÇÃO ---
-    def switch_page(self, index):
-        self.pages.setCurrentIndex(index)
-        # Atualiza o visual dos botões que estão LÁ na sidebar
-        self.sidebar.btn_extracao.setChecked(index == 0)
-        self.sidebar.btn_process.setChecked(index == 1)
-
-    # --- CRIAÇÃO DAS PÁGINAS ---
-    def setup_pages(self):
-        self.pages.addTab(self.create_extraction_page(), "Extração")
-        self.pages.addTab(self.create_processing_page(), "Processamento")
-
-    def create_extraction_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        
-        header = QLabel("Módulos de Extração")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
-        layout.addWidget(header)
-
-        cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(20)
-
-        # Usando a função interna por enquanto (vamos mover depois)
-        hist_card = self.create_modern_card(
-            "📜 Histórico de Dados", 
-            "Captura ocorrências finalizadas dos últimos 90 dias.", 
-            "Sincronizar Histórico", 
-            self.run_historical_sync
-        )
-        active_card = self.create_modern_card(
-            "🚨 Ocorrências Ativas", 
-            "Captura chamadas em andamento no tempo real.", 
-            "Monitorar Ativas", 
-            self.run_active_sync
-        )
-
-        cards_layout.addWidget(hist_card)
-        cards_layout.addWidget(active_card)
-        layout.addLayout(cards_layout)
-
-        # Feedback de Status
-        self.status_frame = QFrame()
-        self.status_frame.setObjectName("Card")
-        self.status_frame.setVisible(False)
-        st_layout = QVBoxLayout(self.status_frame)
-        
-        self.status_msg = QLabel("Pronto para iniciar...")
-        self.status_msg.setStyleSheet("font-weight: bold; color: #2d4157;")
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        
-        st_layout.addWidget(self.status_msg)
-        st_layout.addWidget(self.progress_bar)
-        
-        layout.addSpacing(20)
-        layout.addWidget(self.status_frame)
-        layout.addStretch()
-        return page
+    def switch_page_dummy(self, index):
+        """Função vazia apenas para evitar erros na Sidebar."""
+        pass
 
     def create_modern_card(self, title, desc, btn_txt, callback):
         frame = QFrame()
@@ -158,46 +105,59 @@ class FireApp(QMainWindow):
     def create_processing_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0) # Ajuste para colar nas bordas se desejar
         
+        # 1. Cabeçalho com Título e Botões
         header = QHBoxLayout()
         header_title = QLabel("Monitoramento: Chamadas Ativas")
         header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
         
-        # --- BOTÃO COPIAR ---
-        self.btn_copy = QPushButton("📋 Copiar para WhatsApp")
-        self.btn_copy.setObjectName("ActionBtn")
-        self.btn_copy.setStyleSheet("background-color: #25D366; color: white;") # Verde WhatsApp
-        self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
-        self.btn_copy.setFixedWidth(220)
-
-        # --- BOTÃO EXTRAIR HISTÓRICO (Novo!) ---
         self.btn_history = QPushButton("🔍 Buscar Histórico")
         self.btn_history.setObjectName("ActionBtn")
-        self.btn_history.setStyleSheet("background-color: #2d4157; color: white;")
         self.btn_history.setFixedWidth(180)
         self.btn_history.clicked.connect(self.iniciar_busca_historico)
 
-        btn_view = QPushButton("🔄 Atualizar")
-        btn_view.setObjectName("ActionBtn")
-        btn_view.clicked.connect(self.carregar_chamadas_ativas)
-        btn_view.setFixedWidth(120)
+        self.btn_copy = QPushButton("📋 Copiar para WhatsApp")
+        self.btn_copy.setObjectName("ActionBtn")
+        self.btn_copy.setStyleSheet("background-color: #25D366; color: white;")
+        self.btn_copy.setFixedWidth(220)
+        self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
 
-        
+        # MUDANÇA: O botão agora se chama Sincronizar e chama o Robô
+        self.btn_sync = QPushButton("🔄 Sincronizar CAD")
+        self.btn_sync.setObjectName("ActionBtn")
+        self.btn_sync.setFixedWidth(150)
+        self.btn_sync.clicked.connect(self.run_active_sync) # <-- Aqui a mágica acontece
 
         header.addWidget(header_title)
         header.addStretch()
-        header.addWidget(self.btn_history) # Novo botão aqui
-        header.addWidget(self.btn_copy) # Adicionamos o novo botão
-        header.addWidget(btn_view)
+        header.addWidget(self.btn_history)
+        header.addWidget(self.btn_copy)
+        header.addWidget(self.btn_sync)
         
         layout.addLayout(header)
 
+        # 2. BARRA DE STATUS (Movida para cá)
+        self.status_frame = QFrame()
+        self.status_frame.setObjectName("Card")
+        self.status_frame.setVisible(False) # Começa escondida
+        st_layout = QVBoxLayout(self.status_frame)
+        
+        self.status_msg = QLabel("Pronto para iniciar...")
+        self.status_msg.setStyleSheet("font-weight: bold; color: #2d4157;")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0) # Estilo 'carregando' (infinito)
+        
+        st_layout.addWidget(self.status_msg)
+        st_layout.addWidget(self.progress_bar)
+        
+        layout.addWidget(self.status_frame)
+
+        # 3. TABELA
         self.table_ativas = QTableView() 
         self.table_ativas.setAlternatingRowColors(True)
         self.table_ativas.setSelectionBehavior(QTableView.SelectRows)
         self.table_ativas.verticalHeader().setVisible(False)
-        
-        # O Estilo agora vem automático do STYLE_SHEET!
         
         h_header = self.table_ativas.horizontalHeader()
         h_header.setSectionResizeMode(QHeaderView.Interactive)
@@ -205,7 +165,7 @@ class FireApp(QMainWindow):
 
         layout.addWidget(self.table_ativas)
         return page
-
+    
     # --- LÓGICA DE DADOS E AUTOMAÇÃO ---
     def carregar_chamadas_ativas(self):
         df = self.processor.process_latest_active_call()
@@ -308,14 +268,17 @@ class FireApp(QMainWindow):
         self.worker.start()
 
     def on_automation_finished(self, success, message):
+        """Ao terminar a extração do CAD, atualiza a tabela na mesma tela."""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
+        
         if success:
-            self.status_msg.setText("✅ Sucesso!")
+            self.status_msg.setText("✅ Dados do CAD sincronizados!")
+            # 1. Recarrega os dados do CSV para a tabela
             self.carregar_chamadas_ativas()
-            self.switch_page(1)
+            # 2. NÃO use mais self.switch_page(1), pois já estamos na página certa!
         else:
-            self.status_msg.setText(f"❌ Erro: {message}")
+            self.status_msg.setText(f"❌ Erro na sincronização: {message}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
