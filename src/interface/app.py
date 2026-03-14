@@ -6,7 +6,7 @@ from pathlib import Path
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTOSCREENSCALEFACTOR"] = "1"
 
-# 1. Ambiente e Caminhos
+# 1.1 Ambiente e Caminhos
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent 
 if str(ROOT_DIR) not in sys.path:
@@ -17,12 +17,14 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTabWidget, QFrame, QProgressBar, 
-    QHeaderView, QGraphicsDropShadowEffect, QTableView
+    QHeaderView, QGraphicsDropShadowEffect, QTableView, QTextEdit
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer 
 
 # 3. Seus Módulos - PADRONIZE TUDO COM 'src.'
+from src.processing.services import converter_dataframe_para_objetos, generate_activity_report
 from src.bot.cad_bot import CADAutomationBot
 from src.processing.data_handler import DataProcessor
 from src.interface.styles import STYLE_SHEET, apply_light_theme 
@@ -72,45 +74,18 @@ class FireApp(QMainWindow):
         """Função vazia apenas para evitar erros na Sidebar."""
         pass
 
-    def create_modern_card(self, title, desc, btn_txt, callback):
-        frame = QFrame()
-        frame.setObjectName("Card")
-        frame.setMinimumHeight(220)
-        
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 30))
-        frame.setGraphicsEffect(shadow)
-
-        vbox = QVBoxLayout(frame)
-        vbox.setContentsMargins(25, 25, 25, 25)
-        
-        t = QLabel(title)
-        t.setObjectName("CardTitle")
-        d = QLabel(desc)
-        d.setWordWrap(True)
-        d.setStyleSheet("color: #6a8296; font-size: 13px;")
-
-        btn = QPushButton(btn_txt)
-        btn.setObjectName("ActionBtn")
-        btn.clicked.connect(callback)
-
-        vbox.addWidget(t)
-        vbox.addWidget(d)
-        vbox.addStretch()
-        vbox.addWidget(btn)
-        return frame
-
     def create_processing_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0) # Ajuste para colar nas bordas se desejar
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # 1. Cabeçalho com Título e Botões
+        # 1. CABEÇALHO
         header = QHBoxLayout()
         header_title = QLabel("Monitoramento: Chamadas Ativas")
         header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
         
+        # --- PASSO A: CRIAR OS BOTÕES (Fabricação) ---
+        # Definimos o que eles são ANTES de usá-los
         self.btn_history = QPushButton("🔍 Buscar Histórico")
         self.btn_history.setObjectName("ActionBtn")
         self.btn_history.setFixedWidth(180)
@@ -122,59 +97,78 @@ class FireApp(QMainWindow):
         self.btn_copy.setFixedWidth(220)
         self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
 
-        # MUDANÇA: O botão agora se chama Sincronizar e chama o Robô
         self.btn_sync = QPushButton("🔄 Sincronizar CAD")
         self.btn_sync.setObjectName("ActionBtn")
         self.btn_sync.setFixedWidth(150)
-        self.btn_sync.clicked.connect(self.run_active_sync) # <-- Aqui a mágica acontece
+        self.btn_sync.clicked.connect(self.run_active_sync)
 
+        # --- PASSO B: ADICIONAR AO LAYOUT (Montagem) ---
         header.addWidget(header_title)
         header.addStretch()
-        header.addWidget(self.btn_history)
+        header.addWidget(self.btn_history) # Agora o Python já sabe quem ele é!
         header.addWidget(self.btn_copy)
         header.addWidget(self.btn_sync)
-        
         layout.addLayout(header)
 
-        # 2. BARRA DE STATUS (Movida para cá)
+        # 2. BARRA DE STATUS
         self.status_frame = QFrame()
         self.status_frame.setObjectName("Card")
-        self.status_frame.setVisible(False) # Começa escondida
+        self.status_frame.setVisible(False)
         st_layout = QVBoxLayout(self.status_frame)
-        
-        self.status_msg = QLabel("Pronto para iniciar...")
-        self.status_msg.setStyleSheet("font-weight: bold; color: #2d4157;")
+        self.status_msg = QLabel("Pronto...")
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0) # Estilo 'carregando' (infinito)
-        
         st_layout.addWidget(self.status_msg)
         st_layout.addWidget(self.progress_bar)
-        
         layout.addWidget(self.status_frame)
 
-        # 3. TABELA
+        # 3. TABELA (O peso '1' faz ela ocupar o centro)
         self.table_ativas = QTableView() 
         self.table_ativas.setAlternatingRowColors(True)
         self.table_ativas.setSelectionBehavior(QTableView.SelectRows)
-        self.table_ativas.verticalHeader().setVisible(False)
-        
         h_header = self.table_ativas.horizontalHeader()
-        h_header.setSectionResizeMode(QHeaderView.Interactive)
         h_header.setStretchLastSection(True)
+        layout.addWidget(self.table_ativas, 1) 
 
-        layout.addWidget(self.table_ativas)
+        # 4. CARD DE RELATÓRIO (Agora abaixo da tabela)
+        # Primeiro criamos o Frame
+        self.summary_card = QFrame()
+        self.summary_card.setObjectName("SummaryCard")
+        self.summary_card.setFixedHeight(200)
+        
+        # Depois o Layout para o Frame
+        report_layout = QVBoxLayout(self.summary_card)
+        
+        lbl_preview = QLabel("📋 Pré-visualização para WhatsApp:")
+        lbl_preview.setStyleSheet("font-size: 11px; font-weight: bold; color: #6a8296;")
+        
+        self.txt_preview = QTextEdit()
+        self.txt_preview.setReadOnly(True)
+        self.txt_preview.setStyleSheet("background-color: #f8fafc; font-family: 'Consolas';")
+
+        self.btn_copy_report = QPushButton("📋 Copiar Relatório Completo")
+        self.btn_copy_report.setObjectName("SecondaryBtn")
+        self.btn_copy_report.clicked.connect(self.copy_summary_to_clipboard)
+
+        report_layout.addWidget(lbl_preview)
+        report_layout.addWidget(self.txt_preview)
+        report_layout.addWidget(self.btn_copy_report)
+        
+        layout.addWidget(self.summary_card)
+
         return page
     
     # --- LÓGICA DE DADOS E AUTOMAÇÃO ---
     def carregar_chamadas_ativas(self):
         df = self.processor.process_latest_active_call()
         if df is not None:
-            # Degrau 2: Converte os dados
+            # 1. Atualiza a tabela (O que já funcionava)
             lista_objetos = converter_dataframe_para_objetos(df)
-            
-            # Degrau 3: Usa o novo Model focado em Objetos
             self.model = OcorrenciaTableModel(lista_objetos)
             self.table_ativas.setModel(self.model)
+            
+            # 2. Atualiza o Dashboard e o Preview (O ajuste está aqui)
+            # Em vez de procurar 'lbl_report_text', chamamos o método que criamos
+            self.update_summary_dashboard(df)
             
             self.table_ativas.resizeColumnsToContents()
             self.table_ativas.setColumnWidth(0, 50)
@@ -198,6 +192,33 @@ class FireApp(QMainWindow):
         QTimer.singleShot(2000, lambda: self.btn_copy.setText("📋 Copiar para WhatsApp"))
     
         # Adicione estes métodos à classe FireApp:
+
+    def update_summary_dashboard(self, df):
+        """Atualiza apenas o campo de texto do relatório."""
+        if df is not None and not df.empty:
+            # Importamos a lógica de texto que gera o relatório formatado
+            from src.processing.services import generate_activity_report
+            
+            # Geramos o texto (que já inclui o TOTAL lá dentro, lembra?)
+            report_text = generate_activity_report(df)
+            
+            # Inserimos o texto no campo de pré-visualização abaixo da tabela
+            self.txt_preview.setText(report_text)
+        else:
+            # Caso o DataFrame esteja vazio, limpamos o campo
+            self.txt_preview.clear()
+            self.txt_preview.setPlaceholderText("Nenhum dado encontrado para gerar o relatório.")
+
+    def copy_summary_to_clipboard(self):
+        """Copia o conteúdo que já está visível no preview."""
+        text_to_copy = self.txt_preview.toPlainText()
+        
+        if text_to_copy:
+            QApplication.clipboard().setText(text_to_copy)
+            
+            # Feedback visual no botão
+            self.btn_copy_report.setText("✅ Relatório Copiado!")
+            QTimer.singleShot(2000, lambda: self.btn_copy_report.setText("📋 Copiar para WhatsApp"))
 
     def iniciar_busca_historico(self):
         """Gatilha o robô para buscar o relato no CAD."""
@@ -229,6 +250,26 @@ class FireApp(QMainWindow):
         # Conecta o fim do processo
         self.worker.finished.connect(lambda success, result: self.on_history_finished(success, result, ocorrencia))
         self.worker.start()
+
+    def exibir_relatorio_pop_up(self):
+        """Pega os dados atuais e exibe o resumo em um pop-up."""
+        from PySide6.QtWidgets import QMessageBox
+        
+        # 1. Tentamos processar o arquivo mais recente para garantir dados novos
+        df = self.processor.process_latest_active_call()
+        
+        if df is not None:
+            # 2. Chamamos a lógica que criamos no services.py
+            texto_relatorio = generate_activity_report(df)
+            
+            # 3. Exibimos na tela
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Resumo do Serviço")
+            msg.setText(texto_relatorio)
+            msg.setIcon(QMessageBox.Information)
+            msg.exec()
+        else:
+            QMessageBox.warning(self, "Aviso", "Não há dados disponíveis para gerar o relatório.")
 
     def on_history_finished(self, success, result, ocorrencia):
         """Processa o resultado do OCR e atualiza a interface."""

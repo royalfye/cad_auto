@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# Configuração de logs para sabermos o que o robô está fazendo
+# Log config
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DataProcessor:
@@ -12,18 +12,15 @@ class DataProcessor:
     """
     
     def __init__(self):
-        # 1. Define a Raiz do Projeto
+
         self.root = Path(__file__).resolve().parent.parent.parent
         
-        # 2. Define a estrutura Medalhão (Bronze -> Silver)
-        # Criamos a bronze_path como base para evitar o erro de AttributeError
         self.bronze_path = self.root / "data" / "01_bronze"
         self.path_bronze_active = self.bronze_path / "active"
         self.path_bronze_historical = self.bronze_path / "historical"
         
         self.path_silver = self.root / "data" / "02_silver"
         
-        # 3. Mapeamento de colunas (Mantido conforme seu padrão)
         self.column_map = {
             "Nº chamada": "call_id",
             "Data/hora de criação": "created_at",
@@ -33,80 +30,76 @@ class DataProcessor:
             "Situação": "status",
             "Data/hora da situação atual": "updated_at"
         }
-        
-        # 4. Garante que TODA a estrutura de pastas exista
-        # Isso evita erros de "Pasta não encontrada" na primeira execução
+    
         self.path_bronze_active.mkdir(parents=True, exist_ok=True)
         self.path_bronze_historical.mkdir(parents=True, exist_ok=True)
         self.path_silver.mkdir(parents=True, exist_ok=True)
 
     def process_latest_active_call(self) -> Optional[pd.DataFrame]:
-        """
-        Lê o arquivo mais recente da pasta 'active' e limpa os dados.
-        """
-        # 1. Localizar arquivos
+
+        # 1. Locate the files
         files = list(self.path_bronze_active.glob("*.csv"))
         if not files:
             logging.warning("Nenhum arquivo CSV encontrado em 01_bronze/active")
             return None
         
-        # 2. Pegar o arquivo mais recente (pela data de modificação)
+        # 2. Get the most recent file
         latest_file = max(files, key=lambda f: f.stat().st_mtime)
         logging.info(f"Processando arquivo mais recente: {latest_file.name}")
 
         try:
-            # 3. Leitura
+            # 3. Reading
             df = pd.read_csv(latest_file, sep=';', encoding='latin1', on_bad_lines='skip')
             
-            # 4. Seleção e Renomeação
+            # 4. Selection and renaming
             existing_cols = [c for c in self.column_map.keys() if c in df.columns]
             df_silver = df[existing_cols].rename(columns=self.column_map)
 
-            # --- FILTRO 1: Remove chamadas com status 'Classificada' ---
+            # 5. Filter to remove the lines with 'status': 'Classificada'
             if 'status' in df_silver.columns:
                 df_silver = df_silver[df_silver['status'] != 'Classificada'].copy()
 
-            # --- NOVO FILTRO 2: Mantém apenas ocorrências de PASSOS ---
+            # 6. Filter to only keep the lines with 'Passos' in the 'unit' column
             if 'unit' in df_silver.columns:
                 # O case=False garante que ele ache "PASSOS", "Passos" ou "passos"
                 # O na=False evita erros caso existam células vazias
                 df_silver = df_silver[df_silver['unit'].str.contains('PASSOS', case=False, na=False)].copy()
 
-           # 5. Limpeza de Tipos (Primeiro passo: converter para data real)
+           # 7. Real date convertion
             for col in ['created_at', 'updated_at']:
                 if col in df_silver.columns:
                     df_silver[col] = pd.to_datetime(df_silver[col], dayfirst=True, errors='coerce')
 
-            # --- LÓGICA DE ORDENAÇÃO (Antigas no Topo dentro de cada grupo) ---
+            # 8. Organization: Older on the top
             if 'status' in df_silver.columns and 'created_at' in df_silver.columns:
-                # 1. Marcamos: 0 para Ativas, 1 para Terminadas
+                # 8.1. Active:0 --- Finished:1
                 df_silver['is_finished'] = (df_silver['status'] == 'Terminada').astype(int)
 
-                # 2. Ordenação:
-                # is_finished: True (0 antes de 1) -> Ativas primeiro
-                # created_at: True (Antigas antes de Recentes) -> 14:15 antes de 14:30
+                # 8.2. Organization:
+                # is_finished: True (0 before 1) -> Active calls firt
+                # created_at: True (Older before the recent) -> 14:15 before 14:30
                 df_silver = df_silver.sort_values(
                     by=['is_finished', 'created_at'], 
                     ascending=[True, True] 
                 )
 
-                # 3. Remove a coluna auxiliar
+                # 8.3. Remove the auxiliar column
                 df_silver = df_silver.drop(columns=['is_finished'])
 
-            # --- AGORA SIM: Formatamos para o padrão Brasileiro (Texto) ---
+            # 9. Brazilian format
             for col in ['created_at', 'updated_at']:
                 if col in df_silver.columns:
                     df_silver[col] = df_silver[col].dt.strftime('%d/%m/%Y %H:%M:%S')
 
-            # Limpeza da Natureza (Removendo o que vem após o parêntese)
+            # 10. Nature column cleaning
             if 'nature' in df_silver.columns:
                 df_silver['nature'] = df_silver['nature'].str.split('(').str[0].str.strip()
 
-            # Limpar o ID da chamada
+            # 11. call_id cleaning
             if 'call_id' in df_silver.columns:
                 df_silver['call_id'] = df_silver['call_id'].astype(str).str.replace(r'\D', '', regex=True)
 
-            # --- NOVA COLUNA DE ÍCONES (À ESQUERDA) ---
+            # 12: Status column
             if 'status' in df_silver.columns:
                 status_map = {
                     'Atribuída ao órgão': '🟢',
@@ -117,13 +110,13 @@ class DataProcessor:
                     'Despachada': '🟡',
                     'Em retorno': '🟠'
                 }
-                # .get permite definir o padrão '🔴' caso o status não esteja na lista
+                # set '🔴' as default for status that are not in the map
                 icons = df_silver['status'].apply(lambda x: status_map.get(x, '🔴'))
                 df_silver.insert(0, 'status_indicator', icons)
 
-            # 6. Salvar na Silver
+            # 13. Save on silver
             output_path = self.path_silver / "active_calls_summary.csv"
-            # Importante: salvar com encoding utf-8-sig para os emojis aparecerem no Excel
+            # encoding utf-8-sig
             df_silver.to_csv(output_path, index=False, encoding='utf-8-sig')
             
             logging.info(f"Sucesso! Dados salvos em: {output_path}")
@@ -133,7 +126,7 @@ class DataProcessor:
             logging.error(f"Falha ao processar dados: {e}")
             return None
 
-# Bloco de teste: Só roda se você executar este arquivo diretamente
+# Block test
 if __name__ == "__main__":
     processor = DataProcessor()
     resultado = processor.process_latest_active_call()
