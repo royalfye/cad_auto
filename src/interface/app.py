@@ -25,12 +25,11 @@ from PySide6.QtGui import QColor
 # 3. Seus Módulos - PADRONIZE TUDO COM 'src.'
 from src.bot.cad_bot import CADAutomationBot
 from src.processing.data_handler import DataProcessor
-from src.interface.styles import STYLE_SHEET
+from src.interface.styles import STYLE_SHEET, apply_light_theme 
 from src.interface.workers import AutomationWorker 
 from src.interface.sidebar import SideBar
 from src.processing.services import converter_dataframe_para_objetos
 from src.interface.table_model import OcorrenciaTableModel
-from src.bot.history_bot import HistoryBot
 
 class FireApp(QMainWindow):
     def __init__(self):
@@ -207,7 +206,7 @@ class FireApp(QMainWindow):
             self.status_frame.setVisible(True)
             self.status_msg.setText("⚠️ Selecione uma linha na tabela primeiro!")
             return
-
+        from src.bot.history_bot import HistoryBot
         # Pegamos o objeto Ocorrencia da linha selecionada
         ocorrencia = self.model.ocorrencias[index.row()]
         call_id = ocorrencia.id_chamada
@@ -282,6 +281,7 @@ class FireApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    apply_light_theme(app)
     window = FireApp()
     window.show()
     sys.exit(app.exec())
