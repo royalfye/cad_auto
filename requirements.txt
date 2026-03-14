@@ -5,3 +5,4 @@ pygetwindow
 PySide6
 pywin32
 pywinauto
+easyocr
