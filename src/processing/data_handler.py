@@ -62,11 +62,41 @@ class DataProcessor:
             existing_cols = [c for c in self.column_map.keys() if c in df.columns]
             df_silver = df[existing_cols].rename(columns=self.column_map)
 
-            # 5. Limpeza de Tipos
-            # Datas
+            # --- FILTRO 1: Remove chamadas com status 'Classificada' ---
+            if 'status' in df_silver.columns:
+                df_silver = df_silver[df_silver['status'] != 'Classificada'].copy()
+
+            # --- NOVO FILTRO 2: Mantém apenas ocorrências de PASSOS ---
+            if 'unit' in df_silver.columns:
+                # O case=False garante que ele ache "PASSOS", "Passos" ou "passos"
+                # O na=False evita erros caso existam células vazias
+                df_silver = df_silver[df_silver['unit'].str.contains('PASSOS', case=False, na=False)].copy()
+
+           # 5. Limpeza de Tipos (Primeiro passo: converter para data real)
             for col in ['created_at', 'updated_at']:
                 if col in df_silver.columns:
                     df_silver[col] = pd.to_datetime(df_silver[col], dayfirst=True, errors='coerce')
+
+            # --- LÓGICA DE ORDENAÇÃO (Antigas no Topo dentro de cada grupo) ---
+            if 'status' in df_silver.columns and 'created_at' in df_silver.columns:
+                # 1. Marcamos: 0 para Ativas, 1 para Terminadas
+                df_silver['is_finished'] = (df_silver['status'] == 'Terminada').astype(int)
+
+                # 2. Ordenação:
+                # is_finished: True (0 antes de 1) -> Ativas primeiro
+                # created_at: True (Antigas antes de Recentes) -> 14:15 antes de 14:30
+                df_silver = df_silver.sort_values(
+                    by=['is_finished', 'created_at'], 
+                    ascending=[True, True] 
+                )
+
+                # 3. Remove a coluna auxiliar
+                df_silver = df_silver.drop(columns=['is_finished'])
+
+            # --- AGORA SIM: Formatamos para o padrão Brasileiro (Texto) ---
+            for col in ['created_at', 'updated_at']:
+                if col in df_silver.columns:
+                    df_silver[col] = df_silver[col].dt.strftime('%d/%m/%Y %H:%M:%S')
 
             # Limpeza da Natureza (Removendo o que vem após o parêntese)
             if 'nature' in df_silver.columns:

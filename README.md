@@ -69,24 +69,39 @@ This project uses pre-commit to ensure code quality and automate certain tasks b
   <summary>Clique para expandir a árvore de diretórios</summary>
 
 ```text
-cad-auto/
-│
+cad_auto/
 ├── assets/
-│   └── images/
-│       └── cad_targets/     # Prints de referência (01_... a 09_...)
-│
-├── data/                    # Armazenamento local (Ignorado pelo Git)
-│   ├── 01_bronze/           # Histórico bruto (2018-2026)
-│       └── active/     
-│       └── historical/     
-│   ├── 02_silver/           # Base unificada
-│   └── 03_gold/             # Agregações de indicadores
-│
-├── src/                     # Código-fonte (Padrão Inglês)
-│   ├── bot/                 # cad_bot.py (RPA Sênior)
-│   ├── processing/          # data_handler.py (Engenharia de Dados)
-│   └── interface/           # app.py (Interface Streamlit)
-│
-├── requirements.txt         # Dependências do projeto
-└── README.md                # Documentação
+│   ├── images/
+│   │   └── cad_targets/
+│   │       ├── 01_filter_passos_active.png
+│   │       ├── 02_chamadas_button.png
+│   │       ├── 03_pesquisa_button.png
+│   │       ├── 04_classificadas_button.png
+│   │       ├── 05_ultimas_24_button.png
+│   │       ├── 06_ultimos_3_button.png
+│   │       ├── 07_filtro_passos.button.png
+│   │       ├── 08_passos_button.png
+│   │       ├── 09_exportar_button.png
+│   │       └── 10_ativas_button.png
+│   └── styles.qss
+├── data/
+├── src/
+│   ├── bot/
+│   │   └── cad_bot.py
+│   ├── interface/
+│   │   ├── app.py
+│   │   ├── models.py
+│   │   ├── sidebar.py
+│   │   ├── styles.py
+│   │   ├── table_model.py
+│   │   └── workers.py
+│   ├── processing/
+│   │   ├── data_handler.py
+│   │   ├── models.py
+│   │   └── services.py
+│   ├── utils/
+│   │   └── tree_viewer.py
+│   └── __init__.py
+├── README.md
+└── requirements.txt
 
