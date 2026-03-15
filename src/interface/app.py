@@ -1,74 +1,94 @@
-import os  # Primeiro importamos a biblioteca
+#1 - Imports
+import os
 import sys
 from pathlib import Path
 
-# 1. Configurações de Ambiente (Agora o 'os' já existe para o Python)
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTOSCREENSCALEFACTOR"] = "1"
 
-# 1.1 Ambiente e Caminhos
-
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent 
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-# 2. Terceiros
 import pandas as pd
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QLabel, QTabWidget, QFrame, QProgressBar, 
-    QHeaderView, QGraphicsDropShadowEffect, QTableView, QTextEdit
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QFrame, QProgressBar, QTableView, QTextEdit,
+    QMessageBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
-from PySide6.QtCore import Qt, QTimer 
+from PySide6.QtCore import Qt, QTimer
 
-# 3. Seus Módulos - PADRONIZE TUDO COM 'src.'
-from src.processing.services import converter_dataframe_para_objetos, generate_activity_report
 from src.bot.cad_bot import CADAutomationBot
+from src.bot.history_bot import HistoryBot
 from src.processing.data_handler import DataProcessor
-from src.interface.styles import STYLE_SHEET, apply_light_theme 
-from src.interface.workers import AutomationWorker 
+from src.processing.services import (
+    converter_dataframe_para_objetos, 
+    generate_activity_report
+)
+from src.interface.styles import STYLE_SHEET, apply_light_theme
+from src.interface.workers import AutomationWorker
 from src.interface.sidebar import SideBar
-from src.processing.services import converter_dataframe_para_objetos
 from src.interface.table_model import OcorrenciaTableModel
+from src.interface.components.active_table import ActiveCallsTable
+from src.interface.components.summary_card import SummaryCard
+from src.interface.components.header import HeaderSection
 
+#2 - Class
 class FireApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        # 1. Inicialização de instâncias (Lógica de Negócio)
         self.processor = DataProcessor()
         self.bot = CADAutomationBot()
         
+        # 2. Configurações da Janela Principal
+        self._configure_window()
+        
+        # 3. Construção da Interface
+        self._setup_ui()
+        
+        # 4. Inicialização de Modelos (Dados vazios para começar)
+        self.model = None
+
+    def _configure_window(self):
+        """Configurações básicas da janela principal."""
         self.setWindowTitle("Bombeiros - 2ª CIA Passos")
         self.resize(1200, 800)
         self.setStyleSheet(STYLE_SHEET)
 
-        # Layout Principal
+    def _setup_ui(self):
+        """Orquestra a montagem de todos os componentes visuais."""
+        # Widget Central e Layout Principal
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         self.layout_geral = QHBoxLayout(main_widget)
         self.layout_geral.setContentsMargins(0, 0, 0, 0)
         self.layout_geral.setSpacing(0)
 
-        # Peças da Interface
-        self.sidebar = SideBar(switch_page_callback=self.switch_page_dummy)
-        # Esconde os botões de navegação que não fazem mais sentido
+        # Inicializa Componentes
+        self._create_sidebar()
+        self._create_main_content_area()
+        
+        # Montagem Final
+        self.layout_geral.addWidget(self.sidebar)
+        self.layout_geral.addWidget(self.content_area)
+
+    def _create_sidebar(self):
+        """Cria e configura a barra lateral."""
+        self.sidebar = SideBar(switch_page_callback=lambda: None)
         self.sidebar.btn_extracao.hide()
         self.sidebar.btn_process.hide()
-        
+
+    def _create_main_content_area(self):
+        """Cria a área onde as tabelas e botões de ação ficam."""
         self.content_area = QWidget()
         self.content_layout = QVBoxLayout(self.content_area)
         self.content_layout.setContentsMargins(30, 30, 30, 30)
         self.content_layout.setSpacing(20)
 
-        # Montagem Direta (Sem abas)
-        self.layout_geral.addWidget(self.sidebar)
-        
-        # Criamos direto a página de processamento (que agora é a única)
-        self.monitor_page = self.create_processing_page()
+        # Adiciona a página de processamento
+        self.monitor_page = self.create_processing_page() # Este método vamos refatorar no próximo passo
         self.content_layout.addWidget(self.monitor_page)
-        
-        self.layout_geral.addWidget(self.content_area)
 
     def switch_page_dummy(self, index):
         """Função vazia apenas para evitar erros na Sidebar."""
@@ -77,248 +97,152 @@ class FireApp(QMainWindow):
     def create_processing_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
         
-        # 1. CABEÇALHO
-        header = QHBoxLayout()
-        header_title = QLabel("Monitoramento: Chamadas Ativas")
-        header_title.setStyleSheet("font-size: 24px; font-weight: bold; color: #2d4157;")
+        # Instancia o novo componente
+        self.header = HeaderSection()
         
-        # --- PASSO A: CRIAR OS BOTÕES (Fabricação) ---
-        # Definimos o que eles são ANTES de usá-los
-        self.btn_history = QPushButton("🔍 Buscar Histórico")
-        self.btn_history.setObjectName("ActionBtn")
-        self.btn_history.setFixedWidth(180)
-        self.btn_history.clicked.connect(self.iniciar_busca_historico)
+        # CONEXÃO DOS BOTÕES (O "pulo do gato")
+        # Como os botões agora estão dentro de 'self.header', acessamos assim:
+        self.header.btn_history.clicked.connect(self.iniciar_busca_historico)
+        self.header.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
+        self.header.btn_sync.clicked.connect(self.run_active_sync)
 
-        self.btn_copy = QPushButton("📋 Copiar para WhatsApp")
-        self.btn_copy.setObjectName("ActionBtn")
-        self.btn_copy.setStyleSheet("background-color: #25D366; color: white;")
-        self.btn_copy.setFixedWidth(220)
-        self.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
+        self.status_section = self._create_status_section()
+        self.table_ativas = ActiveCallsTable()
+        self.summary_card = SummaryCard()
 
-        self.btn_sync = QPushButton("🔄 Sincronizar CAD")
-        self.btn_sync.setObjectName("ActionBtn")
-        self.btn_sync.setFixedWidth(150)
-        self.btn_sync.clicked.connect(self.run_active_sync)
-
-        # --- PASSO B: ADICIONAR AO LAYOUT (Montagem) ---
-        header.addWidget(header_title)
-        header.addStretch()
-        header.addWidget(self.btn_history) # Agora o Python já sabe quem ele é!
-        header.addWidget(self.btn_copy)
-        header.addWidget(self.btn_sync)
-        layout.addLayout(header)
-
-        # 2. BARRA DE STATUS
-        self.status_frame = QFrame()
-        self.status_frame.setObjectName("Card")
-        self.status_frame.setVisible(False)
-        st_layout = QVBoxLayout(self.status_frame)
-        self.status_msg = QLabel("Pronto...")
-        self.progress_bar = QProgressBar()
-        st_layout.addWidget(self.status_msg)
-        st_layout.addWidget(self.progress_bar)
-        layout.addWidget(self.status_frame)
-
-        # 3. TABELA (O peso '1' faz ela ocupar o centro)
-        self.table_ativas = QTableView() 
-        self.table_ativas.setAlternatingRowColors(True)
-        self.table_ativas.setSelectionBehavior(QTableView.SelectRows)
-        h_header = self.table_ativas.horizontalHeader()
-        h_header.setStretchLastSection(True)
-        layout.addWidget(self.table_ativas, 1) 
-
-        # 4. CARD DE RELATÓRIO (Agora abaixo da tabela)
-        # Primeiro criamos o Frame
-        self.summary_card = QFrame()
-        self.summary_card.setObjectName("SummaryCard")
-        self.summary_card.setFixedHeight(200)
-        
-        # Depois o Layout para o Frame
-        report_layout = QVBoxLayout(self.summary_card)
-        
-        lbl_preview = QLabel("📋 Pré-visualização para WhatsApp:")
-        lbl_preview.setStyleSheet("font-size: 11px; font-weight: bold; color: #6a8296;")
-        
-        self.txt_preview = QTextEdit()
-        self.txt_preview.setReadOnly(True)
-        self.txt_preview.setStyleSheet("background-color: #f8fafc; font-family: 'Consolas';")
-
-        self.btn_copy_report = QPushButton("📋 Copiar Relatório Completo")
-        self.btn_copy_report.setObjectName("SecondaryBtn")
-        self.btn_copy_report.clicked.connect(self.copy_summary_to_clipboard)
-
-        report_layout.addWidget(lbl_preview)
-        report_layout.addWidget(self.txt_preview)
-        report_layout.addWidget(self.btn_copy_report)
-        
+        # Adição ao layout
+        layout.addWidget(self.header) # Adiciona o componente direto como Widget
+        layout.addWidget(self.status_section)
+        layout.addWidget(self.table_ativas, 1)
         layout.addWidget(self.summary_card)
 
         return page
-    
-    # --- LÓGICA DE DADOS E AUTOMAÇÃO ---
-    def carregar_chamadas_ativas(self):
-        df = self.processor.process_latest_active_call()
-        if df is not None:
-            # 1. Atualiza a tabela (O que já funcionava)
-            lista_objetos = converter_dataframe_para_objetos(df)
-            self.model = OcorrenciaTableModel(lista_objetos)
-            self.table_ativas.setModel(self.model)
-            
-            # 2. Atualiza o Dashboard e o Preview (O ajuste está aqui)
-            # Em vez de procurar 'lbl_report_text', chamamos o método que criamos
-            self.update_summary_dashboard(df)
-            
-            self.table_ativas.resizeColumnsToContents()
-            self.table_ativas.setColumnWidth(0, 50)
 
-    def copiar_ocorrencia_selecionada(self):
-        index = self.table_ativas.currentIndex()
-        if not index.isValid():
-            # Opcional: mostrar mensagem que nada foi selecionado
-            return
-
-        # Pegamos o objeto diretamente do modelo
-        ocorrencia = self.model.ocorrencias[index.row()]
-        texto = ocorrencia.formatar_para_whatsapp()
+    def _create_status_section(self):
+        """Cria a barra de progresso e mensagens de status."""
+        self.status_frame = QFrame()
+        self.status_frame.setObjectName("Card")
+        self.status_frame.setVisible(False)
         
-        # Clipboard do sistema
-        QApplication.clipboard().setText(texto)
+        layout = QVBoxLayout(self.status_frame)
+        self.status_msg = QLabel("Pronto...")
+        self.progress_bar = QProgressBar()
         
-        # Dica de UX: Você pode mudar temporariamente o texto do botão
-        self.btn_copy.setText("✅ Copiado!")
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(2000, lambda: self.btn_copy.setText("📋 Copiar para WhatsApp"))
-    
-        # Adicione estes métodos à classe FireApp:
-
-    def update_summary_dashboard(self, df):
-        """Atualiza apenas o campo de texto do relatório."""
-        if df is not None and not df.empty:
-            # Importamos a lógica de texto que gera o relatório formatado
-            from src.processing.services import generate_activity_report
-            
-            # Geramos o texto (que já inclui o TOTAL lá dentro, lembra?)
-            report_text = generate_activity_report(df)
-            
-            # Inserimos o texto no campo de pré-visualização abaixo da tabela
-            self.txt_preview.setText(report_text)
-        else:
-            # Caso o DataFrame esteja vazio, limpamos o campo
-            self.txt_preview.clear()
-            self.txt_preview.setPlaceholderText("Nenhum dado encontrado para gerar o relatório.")
-
-    def copy_summary_to_clipboard(self):
-        """Copia o conteúdo que já está visível no preview."""
-        text_to_copy = self.txt_preview.toPlainText()
+        layout.addWidget(self.status_msg)
+        layout.addWidget(self.progress_bar)
         
-        if text_to_copy:
-            QApplication.clipboard().setText(text_to_copy)
-            
-            # Feedback visual no botão
-            self.btn_copy_report.setText("✅ Relatório Copiado!")
-            QTimer.singleShot(2000, lambda: self.btn_copy_report.setText("📋 Copiar para WhatsApp"))
-
-    def iniciar_busca_historico(self):
-        """Gatilha o robô para buscar o relato no CAD."""
-        index = self.table_ativas.currentIndex()
-        if not index.isValid():
-            self.status_frame.setVisible(True)
-            self.status_msg.setText("⚠️ Selecione uma linha na tabela primeiro!")
-            return
-        from src.bot.history_bot import HistoryBot
-        # Pegamos o objeto Ocorrencia da linha selecionada
-        ocorrencia = self.model.ocorrencias[index.row()]
-        call_id = ocorrencia.id_chamada
-
-        # 1. Mostra feedback visual
-        self.status_frame.setVisible(True)
-        self.status_msg.setText(f"🤖 Indo buscar histórico do ID: {call_id}")
-        self.progress_bar.setRange(0, 0) # Efeito de 'carregando' infinito
-
-        # 2. Prepara o robô
-        self.h_bot = HistoryBot()
-        
-        # 3. Dispara via Worker (passando a função e o ID)
-        self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
-        
-        # Conecta o sinal de status para as mensagens do bot aparecerem na tela (opcional mas recomendado)
-        if hasattr(self.worker, 'status'):
-            self.worker.status.connect(lambda msg: self.status_msg.setText(msg))
-        
-        # Conecta o fim do processo
-        self.worker.finished.connect(lambda success, result: self.on_history_finished(success, result, ocorrencia))
-        self.worker.start()
-
-    def exibir_relatorio_pop_up(self):
-        """Pega os dados atuais e exibe o resumo em um pop-up."""
-        from PySide6.QtWidgets import QMessageBox
-        
-        # 1. Tentamos processar o arquivo mais recente para garantir dados novos
-        df = self.processor.process_latest_active_call()
-        
-        if df is not None:
-            # 2. Chamamos a lógica que criamos no services.py
-            texto_relatorio = generate_activity_report(df)
-            
-            # 3. Exibimos na tela
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Resumo do Serviço")
-            msg.setText(texto_relatorio)
-            msg.setIcon(QMessageBox.Information)
-            msg.exec()
-        else:
-            QMessageBox.warning(self, "Aviso", "Não há dados disponíveis para gerar o relatório.")
-
-    def on_history_finished(self, success, result, ocorrencia):
-        """Processa o resultado do OCR e atualiza a interface."""
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        
-        if success:
-            # 'result' aqui é o texto que o OCR extraiu da tabela!
-            ocorrencia.historico = result
-            self.status_msg.setText("✅ Histórico capturado com sucesso!")
-            
-            # Notifica a tabela que o dado mudou (isso atualiza o texto se você tiver uma coluna de histórico)
-            self.model.layoutChanged.emit()
-            
-            # Mostra o que foi capturado em um pop-up simples para conferência
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Histórico Capturado", f"Relato extraído:\n\n{result}")
-        else:
-            self.status_msg.setText(f"❌ Falha no OCR: {result}")
-
-
-
-    def run_historical_sync(self):
-    # Remova o 'None' do final
-        self.start_automation(self.bot.run_full_extraction_flow, self.processor.bronze_path)
+        return self.status_frame
 
     def run_active_sync(self):
-    # Remova o 'None' do final
-        self.start_automation(self.bot.run_active_extraction_flow, self.processor.bronze_path)
+        """Inicia a sincronização de chamadas ativas com proteção contra erros."""
+        try:
+            self._start_automation_task(
+                self.bot.run_active_extraction_flow, 
+                self.processor.bronze_path
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Erro de Sincronização", f"Falha ao iniciar robô: {e}")
 
-    def start_automation(self, func, *args):
+    def iniciar_busca_historico(self):
+        """Gatilha o robô para buscar o relato no CAD com validação de seleção."""
+        selection = self.table_ativas.currentIndex()
+        if not selection.isValid():
+            QMessageBox.warning(self, "Aviso", "Selecione uma linha na tabela primeiro!")
+            return
+
+        try:
+            occurrence = self.model.ocorrencias[selection.row()]
+            call_id = occurrence.id_chamada
+
+            self._update_status(f"🤖 Buscando histórico do ID: {call_id}")
+            self.progress_bar.setRange(0, 0)
+
+            self.h_bot = HistoryBot()
+            self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
+            
+            # Conexão de Sinais
+            if hasattr(self.worker, 'status'):
+                self.worker.status.connect(self._update_status)
+            
+            self.worker.finished.connect(
+                lambda success, result: self._on_history_finished(success, result, occurrence)
+            )
+            self.worker.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro no Histórico", f"Erro ao preparar busca: {e}")
+
+    def copiar_ocorrencia_selecionada(self):
+        """Copia dados da ocorrência para o WhatsApp com feedback visual."""
+        index = self.table_ativas.currentIndex()
+        if not index.isValid():
+            return
+
+        try:
+            occurrence = self.model.ocorrencias[index.row()]
+            text = occurrence.formatar_para_whatsapp()
+            QApplication.clipboard().setText(text)
+            
+            self.header.btn_copy.setText("✅ Copiado!")
+            QTimer.singleShot(2000, lambda: self.header.btn_copy.setText("📋 Copiar para WhatsApp"))
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Não foi possível copiar: {e}")
+
+    # --- DATA & UI UPDATES (Atualização da Interface) ---
+
+    def carregar_chamadas_ativas(self):
+        """Atualiza a tabela e o dashboard com os dados mais recentes."""
+        try:
+            df = self.processor.process_latest_active_call()
+            if df is not None:
+                # 1. Prepara os dados
+                lista_objetos = converter_dataframe_para_objetos(df)
+                self.model = OcorrenciaTableModel(lista_objetos)
+                
+                # 2. Gera o relatório de texto
+                report_text = generate_activity_report(df)
+                
+                # 3. Distribui para os componentes
+                self.summary_card.update_text(report_text) # Atualiza o Card
+                self.table_ativas.update_data(self.model)  # Atualiza a Tabela
+                
+        except Exception as e:
+            self._update_status(f"❌ Erro ao carregar dados: {e}")
+
+    def _update_status(self, message):
+        """Método auxiliar para atualizar a barra de status."""
         self.status_frame.setVisible(True)
-        self.status_msg.setText("🤖 Bot em ação...")
+        self.status_msg.setText(message)
+
+    def _start_automation_task(self, func, *args):
+        """Orquestrador genérico para tarefas do robô."""
+        self._update_status("🤖 Bot em ação...")
+        self.progress_bar.setRange(0, 0)
         self.worker = AutomationWorker(func, *args)
-        self.worker.finished.connect(self.on_automation_finished)
+        self.worker.finished.connect(self._on_automation_finished)
         self.worker.start()
 
-    def on_automation_finished(self, success, message):
-        """Ao terminar a extração do CAD, atualiza a tabela na mesma tela."""
+    def _on_automation_finished(self, success, message):
+        """Finaliza a animação do robô e atualiza os dados."""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        
         if success:
-            self.status_msg.setText("✅ Dados do CAD sincronizados!")
-            # 1. Recarrega os dados do CSV para a tabela
+            self._update_status("✅ Dados sincronizados!")
             self.carregar_chamadas_ativas()
-            # 2. NÃO use mais self.switch_page(1), pois já estamos na página certa!
         else:
-            self.status_msg.setText(f"❌ Erro na sincronização: {message}")
+            self._update_status(f"❌ Erro: {message}")
+
+    def _on_history_finished(self, success, result, occurrence):
+        """Trata o retorno da busca de histórico (OCR)."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        if success:
+            occurrence.historico = result
+            self._update_status("✅ Histórico capturado!")
+            self.model.layoutChanged.emit()
+            QMessageBox.information(self, "Sucesso", f"Relato extraído:\n\n{result}")
+        else:
+            self._update_status(f"❌ Falha no OCR: {result}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
