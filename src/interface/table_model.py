@@ -71,8 +71,27 @@ class OcorrenciaTableModel(QAbstractTableModel):
             return True
             
         return False
+    
+    def selecionar_todas(self, estado: bool):
+        """Marca ou desmarca todas as ocorrências da lista."""
+        if not self.ocorrencias:
+            return
+
+        # Começamos a sinalizar a mudança
+        self.layoutAboutToBeChanged.emit()
+        
+        for oc in self.ocorrencias:
+            oc.selecionado = estado
+            
+        # Finalizamos a sinalização para a tabela atualizar o visual
+        self.layoutChanged.emit()
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return self.headers[section]
+        if orientation == Qt.Horizontal:
+            if role == Qt.DisplayRole:
+                return self.headers[section]
+            
+            if role == Qt.ToolTipRole and section == 0:
+                return "Clique aqui para selecionar/desmarcar todas as chamadas"
+        
         return None

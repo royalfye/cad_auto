@@ -80,6 +80,7 @@ class CADAutomationBot:
             self._log_status(ui_status, "🧹 Limpando janelas residuais...")
             self.close_search_subwindow()
             self.focus_cad_window()
+            self.focus_fireapp_window()
             return True
 
         except Exception as e:
@@ -269,7 +270,7 @@ class CADAutomationBot:
             logging.error(f"Error clicking classified button: {e}")
             return False
         
-    #9 For historical flux click on 'Chamadas das Últimos 24h'     
+    #9.1. For historical flux click on 'Chamadas das Últimos 24h'     
     def click_last_24h_button(self) -> bool:
 
         target_image = str(self.assets_path / "05_ultimas_24_button.png")
@@ -451,7 +452,7 @@ class CADAutomationBot:
             excel = None
             pythoncom.CoUninitialize()
 
-    #14 Close the subwindow called 'Pesquisa Chamadas'
+    #15 Close the subwindow called 'Pesquisa Chamadas'
     def close_search_subwindow(self) -> bool:
         
         subwindow_title = "Pesquisa Chamadas"
@@ -477,5 +478,26 @@ class CADAutomationBot:
             logging.error(f"Failed to close subwindow '{subwindow_title}': {e}")
             # Fallback: Send ESC key if window.close() fails
             pyautogui.press('esc')
+            return False
+
+    #16 Return to FireApp   
+    def focus_fireapp_window(self) -> bool:
+        """Traz a interface do FireApp de volta para o primeiro plano."""
+        titulo_app = "Bombeiros - 2ª CIA Passos"
+        try:
+            hwnd = win32gui.FindWindow(None, titulo_app)
+            if hwnd:
+                # Se estiver minimizada, restaura
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                
+                # Traz para frente
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                win32gui.SetForegroundWindow(hwnd)
+                logging.info("🔙 Foco retornado ao FireApp.")
+                return True
+            return False
+        except Exception as e:
+            logging.warning(f"⚠️ Não foi possível retornar o foco para o FireApp: {e}")
             return False
         

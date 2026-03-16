@@ -50,6 +50,8 @@ class FireApp(QMainWindow):
         # 4. Inicialização de Modelos (Dados vazios para começar)
         self.model = None
 
+        self.carregar_chamadas_ativas()
+
     def _configure_window(self):
         """Configurações básicas da janela principal."""
         self.setWindowTitle("Bombeiros - 2ª CIA Passos")
@@ -145,32 +147,53 @@ class FireApp(QMainWindow):
             QMessageBox.critical(self, "Erro de Sincronização", f"Falha ao iniciar robô: {e}")
 
     def iniciar_busca_historico(self):
-        """Gatilha o robô para buscar o relato no CAD com validação de seleção."""
-        selection = self.table_ativas.currentIndex()
-        if not selection.isValid():
-            QMessageBox.warning(self, "Aviso", "Selecione uma linha na tabela primeiro!")
+        """Gatilha o robô para buscar o histórico de todas as ocorrências marcadas."""
+        if not self.model:
             return
 
-        try:
-            occurrence = self.model.ocorrencias[selection.row()]
-            call_id = occurrence.id_chamada
+        # 1. Filtramos todas as ocorrências que o usuário marcou com o "X"
+        selecionadas = [oc for oc in self.model.ocorrencias if oc.selecionado]
 
-            self._update_status(f"🤖 Buscando histórico do ID: {call_id}")
-            self.progress_bar.setRange(0, 0)
+        if not selecionadas:
+            QMessageBox.warning(self, "Aviso", "Marque as caixas de seleção das ocorrências que deseja atualizar!")
+            return
 
-            self.h_bot = HistoryBot()
-            self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
-            
-            # Conexão de Sinais
-            if hasattr(self.worker, 'status'):
-                self.worker.status.connect(self._update_status)
-            
-            self.worker.finished.connect(
-                lambda success, result: self._on_history_finished(success, result, occurrence)
-            )
-            self.worker.start()
-        except Exception as e:
-            QMessageBox.critical(self, "Erro no Histórico", f"Erro ao preparar busca: {e}")
+        # 2. Criamos uma função recursiva ou em loop para processar a fila
+        self._processar_fila_historico(selecionadas)
+
+    def _processar_fila_historico(self, fila):
+        """Processa uma lista de ocorrências, uma por uma."""
+        if not fila:
+            self._update_status("✅ Todas as atualizações concluídas!")
+            QMessageBox.information(self, "Sucesso", "Todas as ocorrências selecionadas foram atualizadas.")
+            return
+
+        # Pega a primeira ocorrência da fila
+        ocorrencia_atual = fila.pop(0)
+        call_id = ocorrencia_atual.id_chamada
+
+        self._update_status(f"🤖 [{len(fila)+1} restantes] Buscando histórico: {call_id}")
+        
+        # Disparamos o Worker para esta ocorrência específica
+        self.h_bot = HistoryBot()
+        self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
+        
+        # Quando ESTE terminar, ele chama automaticamente o próximo da fila
+        self.worker.finished.connect(
+            lambda success, result: self._on_batch_history_finished(success, result, ocorrencia_atual, fila)
+        )
+        self.worker.start()
+
+    def _on_batch_history_finished(self, success, result, occurrence, fila):
+        """Trata o resultado de uma ocorrência e pula para a próxima."""
+        if success:
+            occurrence.historico = result
+            # Desmarca a caixa após processar com sucesso (opcional, melhora a UX)
+            occurrence.selecionado = False 
+            self.model.layoutChanged.emit()
+        
+        # Independente de sucesso ou erro nesta, tenta a próxima da fila
+        self._processar_fila_historico(fila)
 
     def copiar_ocorrencia_selecionada(self):
         """Copia todas as ocorrências marcadas com o Checkbox para o WhatsApp."""
@@ -202,16 +225,35 @@ class FireApp(QMainWindow):
     # --- DATA & UI UPDATES (Atualização da Interface) ---
 
     def carregar_chamadas_ativas(self):
-        """Atualiza a tabela e o dashboard com os dados mais recentes."""
+        """Atualiza a tabela com os dados locais ou recém-sincronizados."""
         try:
             df = self.processor.process_latest_active_call()
-            if df is not None:
+            
+            if df is not None and not df.empty:
+                # 1. Prepara os dados
                 lista_objetos = converter_dataframe_para_objetos(df)
                 self.model = OcorrenciaTableModel(lista_objetos)
+                
+                # 2. Distribui para os componentes
                 report_text = generate_activity_report(df)
                 self.summary_card.update_text(report_text)
                 self.table_ativas.update_data(self.model)
+                
+                # --- O PULO DO GATO ---
+                # Antes de conectar, tentamos desconectar conexões antigas para não duplicar
+                try:
+                    self.table_ativas.clicked.disconnect()
+                except Exception:
+                    # Se não houver conexão para desconectar, ele apenas segue
+                    pass
+                
+                # Agora conectamos o clique ao novo modelo carregado
                 self.table_ativas.clicked.connect(self._toggle_row_checkbox)
+                # ----------------------
+
+                self._update_status("📂 Dados atualizados com sucesso.")
+            else:
+                self._update_status("ℹ️ Nenhuma planilha encontrada. Sincronize com o CAD.")
                 
         except Exception as e:
             self._update_status(f"❌ Erro ao carregar dados: {e}")
@@ -253,17 +295,24 @@ class FireApp(QMainWindow):
     
     def _toggle_row_checkbox(self, index):
         """Inverte o checkbox quando qualquer parte da linha é clicada."""
-        # Criamos o índice da coluna 0 (onde está o checkbox)
-        check_index = self.model.index(index.row(), 0)
+        # Se o usuário clicar exatamente na coluna 0 (a da caixa), 
+        # o PySide já trata o clique sozinho. Só agimos se for nas outras colunas.
+        if index.column() == 0:
+            return
+
+        # Pegamos o modelo
+        model = self.model
+        if not model: return
+
+        # Pegamos o índice exato da coluna 0 para a linha clicada
+        check_index = model.index(index.row(), 0)
         
-        # Pegamos o valor atual do objeto
-        ocorrencia = self.model.ocorrencias[index.row()]
-        
-        # Invertemos o valor (se True vira False, vice-versa)
+        # Pegamos o estado atual
+        ocorrencia = model.ocorrencias[index.row()]
         novo_estado = not ocorrencia.selecionado
         
-        # Atualizamos o modelo (isso vai disparar o setData automaticamente)
-        self.model.setData(check_index, Qt.Checked if novo_estado else Qt.Unchecked, Qt.CheckStateRole)
+        # Atualizamos via setData (que emite o sinal de mudança visual)
+        model.setData(check_index, Qt.Checked if novo_estado else Qt.Unchecked, Qt.CheckStateRole)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
