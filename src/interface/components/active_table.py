@@ -10,10 +10,14 @@ class ActiveCallsTable(QTableView):
     def _configure_style(self):
         """Define o comportamento visual da tabela."""
         self.setAlternatingRowColors(True)
-        self.setSelectionBehavior(QTableView.SelectRows)
-        self.setSelectionMode(QTableView.SingleSelection) # Garante que selecione uma por vez
         
-        # Configura o cabeçalho para expandir corretamente
+        # IMPORTANTE: Mudamos para permitir que o clique chegue à célula individual
+        self.setSelectionBehavior(QTableView.SelectItems) 
+        self.setSelectionMode(QTableView.SingleSelection)
+        
+        # UX: Faz com que o utilizador sinta que a tabela é interativa
+        self.setEditTriggers(QTableView.AllEditTriggers) 
+        
         h_header = self.horizontalHeader()
         h_header.setStretchLastSection(True)
         

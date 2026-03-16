@@ -173,18 +173,29 @@ class FireApp(QMainWindow):
             QMessageBox.critical(self, "Erro no Histórico", f"Erro ao preparar busca: {e}")
 
     def copiar_ocorrencia_selecionada(self):
-        """Copia dados da ocorrência para o WhatsApp com feedback visual."""
-        index = self.table_ativas.currentIndex()
-        if not index.isValid():
+        """Copia todas as ocorrências marcadas com o Checkbox para o WhatsApp."""
+        if not self.model:
+            return
+
+        # 1. Filtramos apenas as ocorrências que o usuário marcou o "X"
+        selecionadas = [oc for oc in self.model.ocorrencias if oc.selecionado]
+
+        # 2. Validação: Se não marcou nada, avisamos
+        if not selecionadas:
+            QMessageBox.warning(self, "Aviso", "Marque pelo menos uma ocorrência na caixa de seleção!")
             return
 
         try:
-            occurrence = self.model.ocorrencias[index.row()]
-            text = occurrence.formatar_para_whatsapp()
-            QApplication.clipboard().setText(text)
+            # 3. Unimos todos os textos das ocorrências selecionadas
+            # O '\n' + '-'*20 + '\n' cria uma linha divisória entre elas
+            texto_final = "\n\n---\n\n".join([oc.formatar_para_whatsapp() for oc in selecionadas])
             
-            self.header.btn_copy.setText("✅ Copiado!")
+            QApplication.clipboard().setText(texto_final)
+            
+            # Feedback visual no botão
+            self.header.btn_copy.setText(f"✅ {len(selecionadas)} Copiadas!")
             QTimer.singleShot(2000, lambda: self.header.btn_copy.setText("📋 Copiar para WhatsApp"))
+            
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Não foi possível copiar: {e}")
 
@@ -195,16 +206,12 @@ class FireApp(QMainWindow):
         try:
             df = self.processor.process_latest_active_call()
             if df is not None:
-                # 1. Prepara os dados
                 lista_objetos = converter_dataframe_para_objetos(df)
                 self.model = OcorrenciaTableModel(lista_objetos)
-                
-                # 2. Gera o relatório de texto
                 report_text = generate_activity_report(df)
-                
-                # 3. Distribui para os componentes
-                self.summary_card.update_text(report_text) # Atualiza o Card
-                self.table_ativas.update_data(self.model)  # Atualiza a Tabela
+                self.summary_card.update_text(report_text)
+                self.table_ativas.update_data(self.model)
+                self.table_ativas.clicked.connect(self._toggle_row_checkbox)
                 
         except Exception as e:
             self._update_status(f"❌ Erro ao carregar dados: {e}")
@@ -243,6 +250,20 @@ class FireApp(QMainWindow):
             QMessageBox.information(self, "Sucesso", f"Relato extraído:\n\n{result}")
         else:
             self._update_status(f"❌ Falha no OCR: {result}")
+    
+    def _toggle_row_checkbox(self, index):
+        """Inverte o checkbox quando qualquer parte da linha é clicada."""
+        # Criamos o índice da coluna 0 (onde está o checkbox)
+        check_index = self.model.index(index.row(), 0)
+        
+        # Pegamos o valor atual do objeto
+        ocorrencia = self.model.ocorrencias[index.row()]
+        
+        # Invertemos o valor (se True vira False, vice-versa)
+        novo_estado = not ocorrencia.selecionado
+        
+        # Atualizamos o modelo (isso vai disparar o setData automaticamente)
+        self.model.setData(check_index, Qt.Checked if novo_estado else Qt.Unchecked, Qt.CheckStateRole)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

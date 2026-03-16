@@ -12,6 +12,7 @@ class Ocorrencia:
     status: str
     status_icone: str
     historico: str = ""
+    selecionado: bool = False
 
     def gerar_link_maps(self) -> str:
         """Gera um link de busca no Google Maps baseado no endereço."""
