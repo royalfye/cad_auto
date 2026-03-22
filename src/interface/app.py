@@ -1,6 +1,7 @@
 #1 - Imports
 import os
 import sys
+import time
 from pathlib import Path
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
@@ -10,7 +11,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+import webbrowser
 import pandas as pd
+from pynput import mouse, keyboard # Instale com: pip install pynput
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QProgressBar, QTableView, QTextEdit,
@@ -32,6 +35,9 @@ from src.interface.table_model import OcorrenciaTableModel
 from src.interface.components.active_table import ActiveCallsTable
 from src.interface.components.summary_card import SummaryCard
 from src.interface.components.header import HeaderSection
+from src.processing.services import obter_nome_grupo_whatsapp
+from src.bot.whatsapp_bot import WhatsAppBot
+from src.bot.sentinel_worker import SentinelWorker
 
 #2 - Class
 class FireApp(QMainWindow):
@@ -51,6 +57,9 @@ class FireApp(QMainWindow):
         self.model = None
 
         self.carregar_chamadas_ativas()
+
+        self.header.play_toggled.connect(self.gerenciar_sentinela)
+        self.sentinela_ativa = False
 
     def _configure_window(self):
         """Configurações básicas da janela principal."""
@@ -96,6 +105,51 @@ class FireApp(QMainWindow):
         """Função vazia apenas para evitar erros na Sidebar."""
         pass
 
+    def gerenciar_sentinela(self, ativo):
+        self.sentinela_ativa = ativo
+        if ativo:
+            self._update_status("🛰️ Sentinela Ativado: Monitorando CAD...")
+            self.iniciar_loop_monitoramento()
+        else:
+            self._update_status("⚪ Sentinela Desativado.")
+            self.parar_loop_monitoramento()
+
+    def iniciar_loop_monitoramento(self):
+        # 1. Traz o CAD para frente antes de começar a olhar
+        if self.bot.focus_cad_window(): 
+            # 2. Define a região de monitoramento (ajuste x, y, w, h conforme seu monitor)
+            # Dica: Monitore a área onde as novas linhas aparecem
+            monitor_region = (0, 0, 1920, 500) 
+            
+            # 3. Instancia e configura o Worker
+            self.sentinel_thread = SentinelWorker(monitor_region)
+            
+            # Conecta os sinais
+            # Quando detectar mudança, roda a sincronização que você já tem pronta
+            self.sentinel_thread.new_occurrence_detected.connect(self.run_active_sync)
+            
+            # Se o usuário mexer o mouse/ESC, o botão da interface volta ao normal
+            self.sentinel_thread.finished_by_user.connect(self._on_sentinel_stopped)
+            
+            self.sentinel_thread.start()
+        else:
+            QMessageBox.warning(self, "Erro", "Não foi possível focar no CAD para monitorar.")
+            self.header.is_monitoring = False
+            self.header._toggle_state()
+
+    def parar_loop_monitoramento(self):
+        """Para a thread do sentinela de forma segura."""
+        if hasattr(self, 'sentinel_thread') and self.sentinel_thread.isRunning():
+            self.sentinel_thread.stop()
+
+    def _on_sentinel_stopped(self, reason):
+        """Callback para quando o sentinela para via hardware (mouse/ESC)."""
+        self.sentinela_ativa = False
+        # Força o botão do Header a voltar para o estado de "Play"
+        self.header.is_monitoring = False
+        self.header._toggle_state()
+        self._update_status(f"⚪ Sentinela parado por: {reason}")
+
     def create_processing_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -107,6 +161,7 @@ class FireApp(QMainWindow):
         # Como os botões agora estão dentro de 'self.header', acessamos assim:
         self.header.btn_history.clicked.connect(self.iniciar_busca_historico)
         self.header.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
+        self.header.btn_send.clicked.connect(self.disparar_whatsapp_automático) 
         self.header.btn_sync.clicked.connect(self.run_active_sync)
 
         self.status_section = self._create_status_section()
@@ -196,26 +251,34 @@ class FireApp(QMainWindow):
         self._processar_fila_historico(fila)
 
     def copiar_ocorrencia_selecionada(self):
-        """Copia todas as ocorrências marcadas com o Checkbox para o WhatsApp."""
+        """Copia as ocorrências marcadas inserindo a Ala selecionada na Sidebar."""
         if not self.model:
             return
 
-        # 1. Filtramos apenas as ocorrências que o usuário marcou o "X"
+        # 1. Pegamos a Ala que está selecionada no ComboBox da Sidebar
+        # O .currentText() pega exatamente o que o usuário está vendo (ex: "4ª ALA")
+        ala_selecionada = self.sidebar.combo_ala.currentText()
+
+        # 2. Filtramos as ocorrências marcadas com o "X"
         selecionadas = [oc for oc in self.model.ocorrencias if oc.selecionado]
 
-        # 2. Validação: Se não marcou nada, avisamos
         if not selecionadas:
-            QMessageBox.warning(self, "Aviso", "Marque pelo menos uma ocorrência na caixa de seleção!")
+            QMessageBox.warning(self, "Aviso", "Marque pelo menos uma ocorrência!")
             return
 
         try:
-            # 3. Unimos todos os textos das ocorrências selecionadas
-            # O '\n' + '-'*20 + '\n' cria uma linha divisória entre elas
-            texto_final = "\n\n---\n\n".join([oc.formatar_para_whatsapp() for oc in selecionadas])
+            # 3. Geramos o texto passando a ala_selecionada como argumento
+            # Agora o método formatar_para_whatsapp(equipe=...) recebe o valor correto
+            lista_textos = [
+                oc.formatar_para_whatsapp(equipe=ala_selecionada) 
+                for oc in selecionadas
+            ]
+            
+            texto_final = "\n\n---\n\n".join(lista_textos)
             
             QApplication.clipboard().setText(texto_final)
             
-            # Feedback visual no botão
+            # Feedback visual
             self.header.btn_copy.setText(f"✅ {len(selecionadas)} Copiadas!")
             QTimer.singleShot(2000, lambda: self.header.btn_copy.setText("📋 Copiar para WhatsApp"))
             
@@ -223,6 +286,28 @@ class FireApp(QMainWindow):
             QMessageBox.warning(self, "Erro", f"Não foi possível copiar: {e}")
 
     # --- DATA & UI UPDATES (Atualização da Interface) ---
+
+    def disparar_whatsapp_automático(self):
+        selecionadas = [oc for oc in self.model.ocorrencias if oc.selecionado]
+        if not selecionadas: return
+
+        ala_sel = self.sidebar.combo_ala.currentText()
+        # A função que você criou no services.py
+        grupo_destino = obter_nome_grupo_whatsapp(ala_sel) 
+
+        self.status_frame.setVisible(True)
+        self._update_status(f"🚀 Disparando para {grupo_destino}...")
+
+        # Instancia o bot do zap
+        ws_bot = WhatsAppBot()
+        
+        for oc in selecionadas:
+            texto = oc.formatar_para_whatsapp(equipe=ala_sel)
+            # Chama o robô para digitar e enviar
+            ws_bot.enviar_para_grupo(grupo_destino, texto)
+            time.sleep(1) # Pausa entre múltiplos disparos
+
+        self._update_status("✅ Disparos concluídos!")
 
     def carregar_chamadas_ativas(self):
         """Atualiza a tabela com os dados locais ou recém-sincronizados."""
@@ -275,9 +360,22 @@ class FireApp(QMainWindow):
         """Finaliza a animação do robô e atualiza os dados."""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
+        
         if success:
             self._update_status("✅ Dados sincronizados!")
             self.carregar_chamadas_ativas()
+            
+            # SE o sentinela estiver ativo, dispara a última ocorrência automaticamente
+            if self.sentinela_ativa and self.model and self.model.ocorrencias:
+                # 1. Pega a ocorrência mais recente (assumindo que é a primeira da lista)
+                ultima_oc = self.model.ocorrencias[0]
+                
+                # 2. Marca ela como selecionada (visual)
+                ultima_oc.selecionado = True
+                self.model.layoutChanged.emit()
+                
+                # 3. Executa o disparo para o WhatsApp
+                QTimer.singleShot(1000, self.disparar_whatsapp_automático)
         else:
             self._update_status(f"❌ Erro: {message}")
 

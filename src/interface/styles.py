@@ -134,7 +134,7 @@ QHeaderView::section {
     border: none;
 }
 
-/* Barra de Progresso */
+/* Estilo da Barra de Progresso */
 QProgressBar {
     background-color: #e0e0e0;
     color: white;
@@ -145,5 +145,36 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #f77965;
     border-radius: 5px;
+}
+
+/* NOVIDADE: Adicione estas linhas antes de fechar as aspas triplas */
+
+#AlaContainer {
+    padding: 10px; 
+    background-color: rgba(255, 255, 255, 0.08); 
+    margin: 10px;
+    border-radius: 8px;
+}
+
+#AlaLabel {
+    font-size: 11px; 
+    font-weight: bold; 
+    color: #ffffff;  /* Branco para contraste total */
+    background: transparent;
+}
+
+#AlaSelector {
+    border: 1px solid #4b5263;
+    border-radius: 4px;
+    padding: 5px;
+    background-color: #1e2227;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+#AlaSelector QAbstractItemView {
+    background-color: #2d4157;
+    color: white;
+    selection-background-color: #f77965;
 }
 """
