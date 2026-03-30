@@ -114,50 +114,62 @@ class FireApp(QMainWindow):
         pass
 
     def gerenciar_sentinela(self, ativo):
+        """Ponto de entrada único para ligar/desligar."""
         self.sentinela_ativa = ativo
         if ativo:
-            self._update_status("🛰️ Sentinela Ativado: Monitorando CAD...")
-            # Limpa qualquer thread resíduo antes de começar
+            # Antes de ligar, garante que está tudo limpo
             self.parar_loop_monitoramento()
-            self.iniciar_loop_monitoramento()
+            # Pequeno delay para garantir a limpeza da memória
+            QTimer.singleShot(500, self.iniciar_loop_monitoramento)
         else:
-            self.sentinela_ativa = False
             self.parar_loop_monitoramento()
-            self._update_status("⚪ Sentinela Desativado.")
+            self._update_status("⚪ Sentinela Desativado manualmente.")
 
     def iniciar_loop_monitoramento(self):
-        """Inicia o sentinela com trava de segurança para não duplicar."""
-        # Se o botão foi desmarcado manualmente, não faz nada
+        """Inicia a thread com verificação de existência."""
         if not self.sentinela_ativa:
             return
 
-        # Traz o CAD para frente
+        # VERIFICAÇÃO CRÍTICA: Se já existe uma thread rodando, não faz nada
+        if hasattr(self, 'sentinel_thread') and self.sentinel_thread is not None:
+            if self.sentinel_thread.isRunning():
+                logging.info("🛰️ Sentinela já está em execução. Ignorando novo início.")
+                return
+
         if self.bot.focar_janela_cad():
-            # Aguarda o Windows terminar de desenhar a janela
+            self._update_status("🛰️ Sentinela: Calibrando visão...")
             QTimer.singleShot(1500, self._disparar_thread_sentinela)
         else:
-            self._update_status("❌ CAD não encontrado. Tentando em 5s...")
-            # Se não achou o CAD, tenta de novo em 5 segundos, mas só se ainda estiver ativo
+            self._update_status("⚠️ CAD não encontrado. Tentando em 10s...")
             if self.sentinela_ativa:
-                QTimer.singleShot(5000, self.iniciar_loop_monitoramento)
+                QTimer.singleShot(10000, self.iniciar_loop_monitoramento)
 
     def _disparar_thread_sentinela(self):
+        """Criação física da thread."""
         if not self.sentinela_ativa: return
         
-        # Cria a thread
+        self._update_status("🛰️ Sentinela: Monitorando tabela...")
         self.sentinel_thread = SentinelWorker()
         self.sentinel_thread.new_occurrence_detected.connect(self._reagir_a_nova_ocorrencia)
         self.sentinel_thread.finished_by_user.connect(self._on_sentinel_stopped)
         self.sentinel_thread.start()
 
     def parar_loop_monitoramento(self):
-        """Para a thread de forma agressiva e limpa a memória."""
+        """Finalização agressiva para evitar loops infinitos."""
         if hasattr(self, 'sentinel_thread') and self.sentinel_thread:
-            if self.sentinel_thread.isRunning():
-                self.sentinel_thread.is_running = False
-                self.sentinel_thread.quit()
-                self.sentinel_thread.wait(2000) # Espera até 2 segundos
-            self.sentinel_thread = None # Deleta a thread da memória
+            # 1. Avisa a thread para parar o loop interno dela
+            self.sentinel_thread.is_running = False
+            # 2. Desconecta os sinais para evitar que ela tente rodar o _on_sentinel_stopped
+            try:
+                self.sentinel_thread.new_occurrence_detected.disconnect()
+                self.sentinel_thread.finished_by_user.disconnect()
+            except:
+                pass
+            # 3. Mata a thread
+            self.sentinel_thread.quit()
+            self.sentinel_thread.wait(1000) 
+            self.sentinel_thread = None
+            logging.info("🛰️ Thread do Sentinela destruída com sucesso.")
 
     def _on_sentinel_stopped(self, reason):
         """Callback para quando o sentinela para via hardware (mouse/ESC)."""
@@ -447,11 +459,21 @@ class FireApp(QMainWindow):
 
             # Reinício do sentinela com tempo de respiro para o usuário
             if self.sentinela_ativa:
+            # 1. Primeiro, garantimos que qualquer resíduo da thread anterior sumiu
                 self.parar_loop_monitoramento()
+                
+                # 2. Damos um tempo de respiro maior (10s) para o Windows estabilizar o foco
+                # e para que você consiga clicar em "Parar" se quiser, sem o bot te atropelar.
+                logging.info("🛰️ Agendando reinício do Sentinela em 10 segundos...")
                 QTimer.singleShot(10000, self.iniciar_loop_monitoramento)
+
         else:
-            self._update_status(f"❌ Erro: {message}")
+            # Caso a automação principal tenha falhado (success = False)
+            self._update_status(f"❌ Erro na extração: {message}")
+            
             if self.sentinela_ativa:
+                self.parar_loop_monitoramento()
+                # Em caso de erro, esperamos um pouco menos para tentar de novo
                 QTimer.singleShot(5000, self.iniciar_loop_monitoramento)
 
     def _on_history_finished(self, success, result, occurrence):
