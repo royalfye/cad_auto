@@ -3,6 +3,14 @@ import os
 import sys
 import time
 from pathlib import Path
+import logging 
+from datetime import datetime 
+
+# Configuração básica para o logging aparecer no terminal com data e hora
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTOSCREENSCALEFACTOR"] = "1"
@@ -381,6 +389,22 @@ class FireApp(QMainWindow):
         # Usamos o QTimer para dar 1 segundo de respiro para o sistema
         QTimer.singleShot(1000, self.run_active_sync)
 
+    def _ocorrencia_ja_disparada(self, call_id):
+        """Verifica se o ID da chamada já consta no arquivo de log."""
+        log_path = Path(ROOT_DIR) / "data" / "disparados.log"
+        if not log_path.exists():
+            return False
+        with open(log_path, "r") as f:
+            ids_enviados = f.read().splitlines()
+        return str(call_id) in ids_enviados
+
+    def _registrar_disparo(self, call_id):
+        """Salva o ID da chamada no arquivo de log para evitar duplicidade."""
+        log_path = Path(ROOT_DIR) / "data" / "disparados.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a") as f:
+            f.write(f"{call_id}\n")
+
     def _on_automation_finished(self, success, message):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
@@ -389,16 +413,41 @@ class FireApp(QMainWindow):
             self._update_status("✅ Dados sincronizados!")
             self.carregar_chamadas_ativas()
             
+            # SE o sentinela estiver ativo, buscamos a cronologicamente mais recente
             if self.sentinela_ativa and self.model and self.model.ocorrencias:
-                ultima_oc = self.model.ocorrencias[0]
-                ultima_oc.selecionado = True
-                self.model.layoutChanged.emit()
-                QTimer.singleShot(1000, self.disparar_whatsapp_automático)
+                try:
+                    # 1. Ordenamos usando 'horario' (que é onde o seu services.py guardou o created_at)
+                    ocorrencias_ordenadas = sorted(
+                        self.model.ocorrencias, 
+                        key=lambda x: datetime.strptime(x.horario, "%d/%m/%Y %H:%M:%S"), 
+                        reverse=True
+                    )
+                    
+                    ultima_oc = ocorrencias_ordenadas[0] 
+                    call_id = ultima_oc.id_chamada
 
-            # SÓ RELIGA SE O BOTÃO ESTIVER MARCADO
+                    # 2. Verificamos se já foi disparada (Memória do Log)
+                    if not self._ocorrencia_ja_disparada(call_id):
+                        # Marca visualmente na tabela
+                        ultima_oc.selecionado = True
+                        self.model.layoutChanged.emit()
+                        
+                        # Registra o ID no log para não repetir e dispara
+                        self._registrar_disparo(call_id)
+                        self._update_status(f"🚀 Nova ocorrência detectada: {call_id}")
+                        
+                        # Disparo automático para o WhatsApp
+                        QTimer.singleShot(1000, self.disparar_whatsapp_automático)
+                    else:
+                        self._update_status(f"ℹ️ Sem novidades. Última ID ({call_id}) já enviada.")
+
+                except Exception as e:
+                    logging.error(f"Erro ao processar datas para disparo: {e}")
+                    self._update_status("❌ Erro ao identificar ocorrência mais recente.")
+
+            # Reinício do sentinela com tempo de respiro para o usuário
             if self.sentinela_ativa:
-                # Aumentamos para 10 segundos para dar tempo do WhatsApp fechar 
-                # e você tirar a mão do mouse
+                self.parar_loop_monitoramento()
                 QTimer.singleShot(10000, self.iniciar_loop_monitoramento)
         else:
             self._update_status(f"❌ Erro: {message}")
