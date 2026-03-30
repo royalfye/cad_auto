@@ -41,7 +41,7 @@ class CADAutomationBot:
         self.excel_process = "EXCEL.EXE"
         
         # Safety config for PyAutoGUI
-        pyautogui.FAILSAFE = True
+        pyautogui.FAILSAFE = False
         pyautogui.PAUSE = 0.2
 
     #2 Main automation flux
@@ -167,6 +167,8 @@ class CADAutomationBot:
         except Exception as e:
             logging.error(f"❌ Falha crítica ao focar janela: {e}")
             return False
+    
+    focar_janela_cad = focus_cad_window
         
     #6 Check if Passos city is selected on the filter (MUST BE CHANGED TO CONFIG THE CITY)    
     def check_passos_filter(self) -> bool:

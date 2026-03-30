@@ -109,38 +109,47 @@ class FireApp(QMainWindow):
         self.sentinela_ativa = ativo
         if ativo:
             self._update_status("🛰️ Sentinela Ativado: Monitorando CAD...")
+            # Limpa qualquer thread resíduo antes de começar
+            self.parar_loop_monitoramento()
             self.iniciar_loop_monitoramento()
         else:
-            self._update_status("⚪ Sentinela Desativado.")
+            self.sentinela_ativa = False
             self.parar_loop_monitoramento()
+            self._update_status("⚪ Sentinela Desativado.")
 
     def iniciar_loop_monitoramento(self):
-        # 1. Traz o CAD para frente antes de começar a olhar
-        if self.bot.focus_cad_window(): 
-            # 2. Define a região de monitoramento (ajuste x, y, w, h conforme seu monitor)
-            # Dica: Monitore a área onde as novas linhas aparecem
-            monitor_region = (0, 0, 1920, 500) 
-            
-            # 3. Instancia e configura o Worker
-            self.sentinel_thread = SentinelWorker(monitor_region)
-            
-            # Conecta os sinais
-            # Quando detectar mudança, roda a sincronização que você já tem pronta
-            self.sentinel_thread.new_occurrence_detected.connect(self.run_active_sync)
-            
-            # Se o usuário mexer o mouse/ESC, o botão da interface volta ao normal
-            self.sentinel_thread.finished_by_user.connect(self._on_sentinel_stopped)
-            
-            self.sentinel_thread.start()
+        """Inicia o sentinela com trava de segurança para não duplicar."""
+        # Se o botão foi desmarcado manualmente, não faz nada
+        if not self.sentinela_ativa:
+            return
+
+        # Traz o CAD para frente
+        if self.bot.focar_janela_cad():
+            # Aguarda o Windows terminar de desenhar a janela
+            QTimer.singleShot(1500, self._disparar_thread_sentinela)
         else:
-            QMessageBox.warning(self, "Erro", "Não foi possível focar no CAD para monitorar.")
-            self.header.is_monitoring = False
-            self.header._toggle_state()
+            self._update_status("❌ CAD não encontrado. Tentando em 5s...")
+            # Se não achou o CAD, tenta de novo em 5 segundos, mas só se ainda estiver ativo
+            if self.sentinela_ativa:
+                QTimer.singleShot(5000, self.iniciar_loop_monitoramento)
+
+    def _disparar_thread_sentinela(self):
+        if not self.sentinela_ativa: return
+        
+        # Cria a thread
+        self.sentinel_thread = SentinelWorker()
+        self.sentinel_thread.new_occurrence_detected.connect(self._reagir_a_nova_ocorrencia)
+        self.sentinel_thread.finished_by_user.connect(self._on_sentinel_stopped)
+        self.sentinel_thread.start()
 
     def parar_loop_monitoramento(self):
-        """Para a thread do sentinela de forma segura."""
-        if hasattr(self, 'sentinel_thread') and self.sentinel_thread.isRunning():
-            self.sentinel_thread.stop()
+        """Para a thread de forma agressiva e limpa a memória."""
+        if hasattr(self, 'sentinel_thread') and self.sentinel_thread:
+            if self.sentinel_thread.isRunning():
+                self.sentinel_thread.is_running = False
+                self.sentinel_thread.quit()
+                self.sentinel_thread.wait(2000) # Espera até 2 segundos
+            self.sentinel_thread = None # Deleta a thread da memória
 
     def _on_sentinel_stopped(self, reason):
         """Callback para quando o sentinela para via hardware (mouse/ESC)."""
@@ -149,6 +158,8 @@ class FireApp(QMainWindow):
         self.header.is_monitoring = False
         self.header._toggle_state()
         self._update_status(f"⚪ Sentinela parado por: {reason}")
+
+    
 
     def create_processing_page(self):
         page = QWidget()
@@ -356,8 +367,21 @@ class FireApp(QMainWindow):
         self.worker.finished.connect(self._on_automation_finished)
         self.worker.start()
 
+    def _reagir_a_nova_ocorrencia(self):
+        """Bloqueia o sentinela temporariamente para o robô trabalhar em paz."""
+        if not self.sentinela_ativa:
+            return
+
+        # 1. Pausa o 'olho' do sentinela para ele não detectar os próprios cliques do robô
+        self.sentinel_thread.is_running = False 
+        
+        self._update_status("🚨 Nova ocorrência! Iniciando extração...")
+        
+        # 2. Roda a sincronização (que já foca a janela e extrai)
+        # Usamos o QTimer para dar 1 segundo de respiro para o sistema
+        QTimer.singleShot(1000, self.run_active_sync)
+
     def _on_automation_finished(self, success, message):
-        """Finaliza a animação do robô e atualiza os dados."""
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         
@@ -365,19 +389,21 @@ class FireApp(QMainWindow):
             self._update_status("✅ Dados sincronizados!")
             self.carregar_chamadas_ativas()
             
-            # SE o sentinela estiver ativo, dispara a última ocorrência automaticamente
             if self.sentinela_ativa and self.model and self.model.ocorrencias:
-                # 1. Pega a ocorrência mais recente (assumindo que é a primeira da lista)
                 ultima_oc = self.model.ocorrencias[0]
-                
-                # 2. Marca ela como selecionada (visual)
                 ultima_oc.selecionado = True
                 self.model.layoutChanged.emit()
-                
-                # 3. Executa o disparo para o WhatsApp
                 QTimer.singleShot(1000, self.disparar_whatsapp_automático)
+
+            # SÓ RELIGA SE O BOTÃO ESTIVER MARCADO
+            if self.sentinela_ativa:
+                # Aumentamos para 10 segundos para dar tempo do WhatsApp fechar 
+                # e você tirar a mão do mouse
+                QTimer.singleShot(10000, self.iniciar_loop_monitoramento)
         else:
             self._update_status(f"❌ Erro: {message}")
+            if self.sentinela_ativa:
+                QTimer.singleShot(5000, self.iniciar_loop_monitoramento)
 
     def _on_history_finished(self, success, result, occurrence):
         """Trata o retorno da busca de histórico (OCR)."""
