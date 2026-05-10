@@ -208,6 +208,7 @@ class HistoryBot(CADAutomationBot):
             # 6. LIMPEZA GARANTIDA: Este bloco executa SEMPRE
             # Chamamos o método que você atualizou para limpar o ambiente
             self.fechar_subjanela_gestao(ui_status)
+            self.focus_fireapp_window()
     
     def abrir_aba_historico(self, ui_status=None) -> bool:
         """

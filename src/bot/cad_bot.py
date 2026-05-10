@@ -1,5 +1,3 @@
-# 1. Imports
-# Python native imports
 from datetime import datetime
 import logging
 import os
@@ -7,7 +5,6 @@ import pythoncom
 from pathlib import Path
 import time
 
-# Third-part library
 import psutil
 import pyautogui
 import pygetwindow as gw
@@ -22,8 +19,17 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-class CADAutomationBot:
+# Global Logging Configuration
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
+class CADAutomationBot:
+    """
+    Bot automation to extract the Active calls from CAD Java software from CBMMG. The final point is to get and update the .csv archive file of all active calls.   
+    """
+    #1 Init
     def __init__(self):
         # Paths
         self.bot_dir = Path(__file__).resolve().parent
@@ -35,21 +41,10 @@ class CADAutomationBot:
         self.excel_process = "EXCEL.EXE"
         
         # Safety config for PyAutoGUI
-        pyautogui.FAILSAFE = True
+        pyautogui.FAILSAFE = False
         pyautogui.PAUSE = 0.2
 
-    def _log_status(self, ui_status, message=None):
-
-        if message is None:
-            message = ui_status
-            ui_status = None
-    
-        logging.info(message) 
-        
-        if ui_status is not None and hasattr(ui_status, 'write'):
-            ui_status.write(message)
-
-    # Main automation flux
+    #2 Main automation flux
     def _base_extraction_flow(self, bronze_root: Path, extraction_type: str, ui_status=None) -> bool:
         try:
             self._log_status(ui_status, "🧹 Preparando ambiente...")
@@ -68,10 +63,10 @@ class CADAutomationBot:
             if extraction_type == "historical":
                 if not self.click_classified_button(): return False
                 if not self.click_last_24h_button(): return False
-                if not self.click_last_3_months_button(): return False
+                if not self.click_last_3_day_button(): return False
             elif extraction_type == "active":
                 if not self.click_active_button(): return False
-            # ---------------------------------
+
 
             self._log_status(ui_status, "✍️ Filtrando cidade: Passos...")
             if not self.filter_by_city_name("passos"): return False
@@ -85,18 +80,317 @@ class CADAutomationBot:
             self._log_status(ui_status, "🧹 Limpando janelas residuais...")
             self.close_search_subwindow()
             self.focus_cad_window()
+            self.focus_fireapp_window()
             return True
 
         except Exception as e:
             logging.error(f"Erro no fluxo {extraction_type}: {e}")
             return False
         
+    #2.1 Separate the historical and active flux. (HISTORCAL isn't using at the moment)
     def run_full_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
         return self._base_extraction_flow(bronze_root, "historical", ui_status)
 
     def run_active_extraction_flow(self, bronze_root: Path, ui_status=None) -> bool:
         return self._base_extraction_flow(bronze_root, "active", ui_status)
         
+    #3 Logging
+    def _log_status(self, ui_status, message=None):
+
+        if message is None:
+            message = ui_status
+            ui_status = None
+    
+        logging.info(message) 
+        
+        if ui_status is not None and hasattr(ui_status, 'write'):
+            ui_status.write(message)
+
+    #4 Close all execel processes
+    def close_excel_processes(self) -> int:
+        closed_count = 0
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'] and proc.info['name'].upper() == self.excel_process:
+                    proc.terminate() 
+                    try:
+                        proc.wait(timeout=0.5)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        
+                    closed_count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        
+        if closed_count > 0:
+            logging.info(f"🧹 Limpeza: {closed_count} processo(s) do Excel encerrado(s).")
+        return closed_count
+    
+    #5 Focus Cad Window
+    def focus_cad_window(self) -> bool:
+        try:
+            hwnd = win32gui.FindWindow(None, self.cad_title)
+            
+            if not hwnd:
+                logging.warning(f"⚠️ Janela não encontrada: {self.cad_title}")
+                return False
+
+            # if its minimized
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.5)
+
+            # Maximizes
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            
+            # Bypass for Windows security
+            pyautogui.press('alt')
+            
+            # Try to bring it to the front
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception as e:
+                logging.warning(f"Tentativa inicial de foco falhou, tentando forçar: {e}")
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.SendKeys('%')
+                win32gui.SetForegroundWindow(hwnd)
+
+            # Clicks on relative position
+            rect = win32gui.GetWindowRect(hwnd)
+            center_x = rect[0] + (rect[2] - rect[0]) // 2
+            top_y = rect[1] + 15
+            pyautogui.click(center_x, top_y)
+            
+            logging.info("🎯 Janela do CAD focada e pronta para interação.")
+            return True
+
+        except Exception as e:
+            logging.error(f"❌ Falha crítica ao focar janela: {e}")
+            return False
+    
+    focar_janela_cad = focus_cad_window
+        
+    #6 Check if Passos city is selected on the filter (MUST BE CHANGED TO CONFIG THE CITY)    
+    def check_passos_filter(self) -> bool:
+        """Check if the filter Passos in on the screen."""
+
+        # Image check in assets folder
+        target_image = self.assets_path / "01_filter_passos_active.png"
+        if not target_image.exists():
+            logging.error(f"Imagem de referência não encontrada: {target_image}")
+            return False
+
+        try:
+            # target the image file
+            location = pyautogui.locateOnScreen(str(target_image), confidence=0.9)
+            
+            if location:
+                logging.info("✅ Filtro 'PASSOS' detectado com sucesso.")
+                return True
+            
+            logging.warning("⚠️ Filtro 'PASSOS' não encontrado na tela.")
+            return False
+        except Exception as e:
+            logging.error(f"Erro no reconhecimento de imagem: {e}")
+            return False
+        
+    #7 Click on 'Chamadas' button
+    def click_calls_button(self) -> bool:
+        """Busca o botão de chamadas e clica. Mantendo sua lógica original de clique direto."""
+        target_image = str(self.assets_path / "02_chamadas_button.png")
+        
+        if not os.path.exists(target_image):
+            logging.error(f"Imagem não encontrada: {target_image}")
+            return False
+
+        try:
+
+            button_location = None
+            for _ in range(5):
+                button_location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+                if button_location:
+                    break
+                time.sleep(1)
+
+            if button_location:
+
+                pyautogui.click(button_location)
+                logging.info("✅ Calls button (02) clicked successfully.")
+                return True
+            
+            logging.warning("⚠️ Calls button (02) not found on screen.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error clicking calls button: {e}")
+            return False
+    
+    #8 Click on 'Pesquisa de Chamadas' button
+    def click_search_button(self) -> bool:
+
+        target_image = str(self.assets_path / "03_pesquisa_button.png")
+        
+        if not os.path.exists(target_image):
+            logging.error(f"Image not found: {target_image}")
+            return False
+
+        try:
+            # Search for search button
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+            
+            if location:
+                pyautogui.click(location)
+                logging.info("Search button (03) clicked successfully.")
+                return True
+            
+            logging.warning("Search button (03) not found.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error clicking search button: {e}")
+            return False
+    
+    #9 For historical flux click on 'Chamadas Classificadas'
+    def click_classified_button(self) -> bool:
+
+        target_image = str(self.assets_path / "04_classificadas_button.png")
+        
+        time.sleep(0.8) 
+
+        try:
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
+            
+            if location:
+                pyautogui.click(location)
+                logging.info("Classified button (04) clicked successfully.")
+                return True
+            
+            logging.warning("Classified button (04) not found on screen.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error clicking classified button: {e}")
+            return False
+        
+    #9.1. For historical flux click on 'Chamadas das Últimos 24h'     
+    def click_last_24h_button(self) -> bool:
+
+        target_image = str(self.assets_path / "05_ultimas_24_button.png")
+        if not os.path.exists(target_image):
+            logging.error(f"Image not found: {target_image}")
+            return False
+
+        try:
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+            if location:
+                pyautogui.click(location)
+                logging.info("Last 24h button (05) clicked.")
+                return True
+            return False
+        except Exception as e:
+            logging.error(f"Error clicking button 05: {e}")
+            return False
+
+    #10 For historical flux click on 'Últimos 3 dias' 
+    def click_last_3_day_button(self) -> bool:
+        target_image = str(self.assets_path / "06_ultimos_3_button.png")
+        if not os.path.exists(target_image):
+            logging.error(f"Image not found: {target_image}")
+            return False
+
+        try:
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+            if location:
+                pyautogui.click(location)
+                logging.info("Last 3 months button (06) clicked.")
+                return True
+            return False
+        except Exception as e:
+            logging.error(f"Error clicking button 06: {e}")
+            return False
+        
+    #11 For Active Flux, click on "Chamadas Ativas" 
+    def click_active_button(self) -> bool:
+        target_image = str(self.assets_path / "10_ativas_button.png")
+        
+        time.sleep(0.8) 
+
+        try:
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
+            
+            if location:
+                pyautogui.click(location)
+                logging.info("Active button (04) clicked successfully.")
+                return True
+            
+            logging.warning("Active button (04) not found on screen.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error clicking active button: {e}")
+            return False
+        
+    #12 Type the word 'passos' (MUST BE CHANGED FOR CITY CONFIG) 
+    def filter_by_city_name(self, city_name: str = "passos") -> bool:
+        # Paths for the images
+        img_field = str(self.assets_path / "07_filtro_passos.button.png")
+        img_confirm = str(self.assets_path / "08_passos_button.png")
+
+        try:
+  
+            field_loc = pyautogui.locateCenterOnScreen(img_field, confidence=0.9)
+            if not field_loc:
+                logging.warning("City filter field (07) not found.")
+                return False
+            
+            pyautogui.click(field_loc)
+            time.sleep(0.2) # Wait for focus
+            
+            # Type the city name
+            pyautogui.write(city_name, interval=0.1)
+            logging.info(f"Typed city: {city_name}")
+            time.sleep(0.2)
+
+
+            confirm_loc = pyautogui.locateCenterOnScreen(img_confirm, confidence=0.9)
+            if not confirm_loc:
+                logging.warning("City confirmation button (08) not found.")
+                return False
+            
+            pyautogui.click(confirm_loc)
+            logging.info("City filter confirmed (08).")
+            return True
+
+        except Exception as e:
+            logging.error(f"Error during city filtering: {e}")
+            return False
+        
+    #13 Click on 'Exportar CSV' to open the excel software
+    def click_export_button(self) -> bool:
+        
+        target_image = str(self.assets_path / "09_exportar_button.png")
+        
+        if not os.path.exists(target_image):
+            logging.error(f"Export image not found: {target_image}")
+            return False
+
+        try:
+            # Locate the export button
+            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
+            
+            if location:
+                pyautogui.click(location)
+                logging.info("Export button (09) clicked successfully.")
+                return True
+            
+            logging.warning("Export button (09) not found on screen.")
+            return False
+
+        except Exception as e:
+            logging.error(f"Error while clicking export button: {e}")
+            return False
+        
+    #14 Save excel file
     def save_excel_export(self, folder_path: Path, extraction_type: str = "historical") -> bool:
         pythoncom.CoInitialize()
         excel = None
@@ -160,316 +454,9 @@ class CADAutomationBot:
             excel = None
             pythoncom.CoUninitialize()
 
-    def check_passos_filter(self) -> bool:
-        """Check if the filter Passos in on the screen."""
-
-        # Image check in assets folder
-        target_image = self.assets_path / "01_filter_passos_active.png"
-        if not target_image.exists():
-            logging.error(f"Imagem de referência não encontrada: {target_image}")
-            return False
-
-        try:
-            # target the image file
-            location = pyautogui.locateOnScreen(str(target_image), confidence=0.9)
-            
-            if location:
-                logging.info("✅ Filtro 'PASSOS' detectado com sucesso.")
-                return True
-            
-            logging.warning("⚠️ Filtro 'PASSOS' não encontrado na tela.")
-            return False
-        except Exception as e:
-            logging.error(f"Erro no reconhecimento de imagem: {e}")
-            return False
-        
-    # Closes all execel processes
-    def close_excel_processes(self) -> int:
-        closed_count = 0
-        for proc in psutil.process_iter(['name']):
-            try:
-                if proc.info['name'] and proc.info['name'].upper() == self.excel_process:
-                    proc.terminate() 
-                    try:
-                        proc.wait(timeout=0.5)
-                    except psutil.TimeoutExpired:
-                        proc.kill()
-                        
-                    closed_count += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                continue
-        
-        if closed_count > 0:
-            logging.info(f"🧹 Limpeza: {closed_count} processo(s) do Excel encerrado(s).")
-        return closed_count
-
-    # Focus Cad Window
-    def focus_cad_window(self) -> bool:
-        try:
-            hwnd = win32gui.FindWindow(None, self.cad_title)
-            
-            if not hwnd:
-                logging.warning(f"⚠️ Janela não encontrada: {self.cad_title}")
-                return False
-
-            # if its minimized
-            if win32gui.IsIconic(hwnd):
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.5)
-
-            # Maximizes
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
-            
-            # Bypass for Windows security
-            pyautogui.press('alt')
-            
-            # Try to bring it to the front
-            try:
-                win32gui.SetForegroundWindow(hwnd)
-            except Exception as e:
-                logging.warning(f"Tentativa inicial de foco falhou, tentando forçar: {e}")
-                shell = win32com.client.Dispatch("WScript.Shell")
-                shell.SendKeys('%')
-                win32gui.SetForegroundWindow(hwnd)
-
-            # Clicks on relative position
-            rect = win32gui.GetWindowRect(hwnd)
-            center_x = rect[0] + (rect[2] - rect[0]) // 2
-            top_y = rect[1] + 15
-            pyautogui.click(center_x, top_y)
-            
-            logging.info("🎯 Janela do CAD focada e pronta para interação.")
-            return True
-
-        except Exception as e:
-            logging.error(f"❌ Falha crítica ao focar janela: {e}")
-            return False
-        
-    # Click on 'Chamadas'
-    def click_calls_button(self) -> bool:
-        """Busca o botão de chamadas e clica. Mantendo sua lógica original de clique direto."""
-        target_image = str(self.assets_path / "02_chamadas_button.png")
-        
-        if not os.path.exists(target_image):
-            logging.error(f"Imagem não encontrada: {target_image}")
-            return False
-
-        try:
-            # Em vez de uma tentativa única, damos 5 segundos para o botão aparecer
-            button_location = None
-            for _ in range(5):
-                button_location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-                if button_location:
-                    break
-                time.sleep(1)
-
-            if button_location:
-                # Volta para o seu clique direto e rápido que funcionava
-                pyautogui.click(button_location)
-                logging.info("✅ Calls button (02) clicked successfully.")
-                return True
-            
-            logging.warning("⚠️ Calls button (02) not found on screen.")
-            return False
-
-        except Exception as e:
-            logging.error(f"Error clicking calls button: {e}")
-            return False
-        
-    def click_search_button(self) -> bool:
-        """
-        Locates and clicks the search tool button (03_pesquisa_button.png).
-        Returns:
-            bool: True if clicked, False otherwise.
-        """
-        target_image = str(self.assets_path / "03_pesquisa_button.png")
-        
-        if not os.path.exists(target_image):
-            logging.error(f"Image not found: {target_image}")
-            return False
-
-        try:
-            # Search for search button
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-            
-            if location:
-                pyautogui.click(location)
-                logging.info("Search button (03) clicked successfully.")
-                return True
-            
-            logging.warning("Search button (03) not found.")
-            return False
-
-        except Exception as e:
-            logging.error(f"Error clicking search button: {e}")
-            return False
-    
-    def click_classified_button(self) -> bool:
-        """
-        Locates and clicks the 'Classificadas' button (04).
-        Includes a small delay for Java UI rendering.
-        """
-        target_image = str(self.assets_path / "04_classificadas_button.png")
-        
-        time.sleep(0.8) 
-
-        try:
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
-            
-            if location:
-                pyautogui.click(location)
-                logging.info("Classified button (04) clicked successfully.")
-                return True
-            
-            logging.warning("Classified button (04) not found on screen.")
-            return False
-
-        except Exception as e:
-            logging.error(f"Error clicking classified button: {e}")
-            return False
-    
-    def click_active_button(self) -> bool:
-        """
-        Locates and clicks the 'Ativas' button (10).
-        Includes a small delay for Java UI rendering.
-        """
-        target_image = str(self.assets_path / "10_ativas_button.png")
-        
-        time.sleep(0.8) 
-
-        try:
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.85)
-            
-            if location:
-                pyautogui.click(location)
-                logging.info("Active button (04) clicked successfully.")
-                return True
-            
-            logging.warning("Active button (04) not found on screen.")
-            return False
-
-        except Exception as e:
-            logging.error(f"Error clicking active button: {e}")
-            return False
-        
-    
-        
-    def click_last_24h_button(self) -> bool:
-        """
-        Locates and clicks the 'Last 24 Hours' filter button (05).
-        Returns:
-            bool: True if clicked, False otherwise.
-        """
-        target_image = str(self.assets_path / "05_ultimas_24_button.png")
-        if not os.path.exists(target_image):
-            logging.error(f"Image not found: {target_image}")
-            return False
-
-        try:
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-            if location:
-                pyautogui.click(location)
-                logging.info("Last 24h button (05) clicked.")
-                return True
-            return False
-        except Exception as e:
-            logging.error(f"Error clicking button 05: {e}")
-            return False
-
-    def click_last_3_months_button(self) -> bool:
-        """
-        Locates and clicks the 'Last 3 Months' filter button (06).
-        Returns:
-            bool: True if clicked, False otherwise.
-        """
-        target_image = str(self.assets_path / "06_ultimos_3_button.png")
-        if not os.path.exists(target_image):
-            logging.error(f"Image not found: {target_image}")
-            return False
-
-        try:
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-            if location:
-                pyautogui.click(location)
-                logging.info("Last 3 months button (06) clicked.")
-                return True
-            return False
-        except Exception as e:
-            logging.error(f"Error clicking button 06: {e}")
-            return False
-        
-    def filter_by_city_name(self, city_name: str = "passos") -> bool:
-        """
-        Clicks the city filter field (07), types the city name, 
-        and clicks the confirmation button (08).
-        """
-        # Paths for the images
-        img_field = str(self.assets_path / "07_filtro_passos.button.png")
-        img_confirm = str(self.assets_path / "08_passos_button.png")
-
-        try:
-            # Step 07: Click the filter field
-            field_loc = pyautogui.locateCenterOnScreen(img_field, confidence=0.9)
-            if not field_loc:
-                logging.warning("City filter field (07) not found.")
-                return False
-            
-            pyautogui.click(field_loc)
-            time.sleep(0.2) # Wait for focus
-            
-            # Type the city name
-            pyautogui.write(city_name, interval=0.1)
-            logging.info(f"Typed city: {city_name}")
-            time.sleep(0.2)
-
-            # Step 08: Click the confirmation button
-            confirm_loc = pyautogui.locateCenterOnScreen(img_confirm, confidence=0.9)
-            if not confirm_loc:
-                logging.warning("City confirmation button (08) not found.")
-                return False
-            
-            pyautogui.click(confirm_loc)
-            logging.info("City filter confirmed (08).")
-            return True
-
-        except Exception as e:
-            logging.error(f"Error during city filtering: {e}")
-            return False
-        
-    def click_export_button(self) -> bool:
-        """
-        Locates and clicks the 'Export' button (09).
-        This action typically triggers the file saving dialog.
-        Returns:
-            bool: True if clicked, False otherwise.
-        """
-        target_image = str(self.assets_path / "09_exportar_button.png")
-        
-        if not os.path.exists(target_image):
-            logging.error(f"Export image not found: {target_image}")
-            return False
-
-        try:
-            # Locate the export button
-            location = pyautogui.locateCenterOnScreen(target_image, confidence=0.9)
-            
-            if location:
-                pyautogui.click(location)
-                logging.info("Export button (09) clicked successfully.")
-                return True
-            
-            logging.warning("Export button (09) not found on screen.")
-            return False
-
-        except Exception as e:
-            logging.error(f"Error while clicking export button: {e}")
-            return False
-
+    #15 Close the subwindow called 'Pesquisa Chamadas'
     def close_search_subwindow(self) -> bool:
-        """
-        Locates the 'Pesquisa Chamadas' subwindow and closes it to 
-        return the CAD to its initial state.
-        """
+        
         subwindow_title = "Pesquisa Chamadas"
         try:
             # Search for the specific subwindow
@@ -494,25 +481,25 @@ class CADAutomationBot:
             # Fallback: Send ESC key if window.close() fails
             pyautogui.press('esc')
             return False
-        
 
-    def prepare_environment(self) -> bool:
-        """
-        Main orchestration for setting up the environment.
-        1. Closes Excel.
-        2. Focusses and Maximizes CAD.
-        """
-        self.close_excel_processes()
-        time.sleep(1) # Wait for OS process release
+    #16 Return to FireApp   
+    def focus_fireapp_window(self) -> bool:
+        """Traz a interface do FireApp de volta para o primeiro plano."""
+        titulo_app = "Bombeiros - 2ª CIA Passos"
+        try:
+            hwnd = win32gui.FindWindow(None, titulo_app)
+            if hwnd:
+                # Se estiver minimizada, restaura
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                
+                # Traz para frente
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                win32gui.SetForegroundWindow(hwnd)
+                logging.info("🔙 Foco retornado ao FireApp.")
+                return True
+            return False
+        except Exception as e:
+            logging.warning(f"⚠️ Não foi possível retornar o foco para o FireApp: {e}")
+            return False
         
-        if self.focus_cad_window():
-            logging.info("Environment preparation successful.")
-            return True
-        
-        logging.error("Environment preparation failed.")
-        return False
-
-# --- ENTRY POINT ---
-if __name__ == "__main__":
-    bot = CADAutomationBot()
-    bot.prepare_environment()

@@ -101,3 +101,48 @@ QProgressBar::chunk {
     background-color: #f77965;
     border-radius: 5px;
 }
+
+/* Estilo do Container da Ala na Sidebar */
+#AlaContainer {
+    padding: 15px; 
+    background-color: rgba(255, 255, 255, 0.08); /* Aumentei levemente a opacidade para destaque */
+    margin: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Uma borda sutil para profundidade */
+}
+
+/* Título 'ALA DE PLANTÃO' com mais contraste */
+#AlaLabel {
+    font-size: 11px; 
+    font-weight: bold; 
+    color: #ffffff;      /* Branco puro para contraste máximo */
+    background: transparent;
+    margin-bottom: 5px;
+}
+
+/* Estilo do Seletor (ComboBox) */
+#AlaSelector {
+    border: 1px solid #4b5263;
+    border-radius: 4px;
+    padding: 5px 10px;
+    background-color: #1e2227; /* Um pouco mais escuro que o container */
+    color: #ffffff;
+    font-weight: bold;
+    min-height: 30px;
+}
+
+/* Estilo da lista que abre no ComboBox */
+#AlaSelector QAbstractItemView {
+    background-color: #282c34;
+    color: white;
+    selection-background-color: #f77965; /* Cor coral do seu tema para a seleção */
+    outline: none;
+    border: 1px solid #4b5263;
+}
+
+#AlaSelector QAbstractItemView {
+    background-color: #282c34;
+    color: white;
+    selection-background-color: #4b5263;
+    border: 1px solid #3e4451;
+}

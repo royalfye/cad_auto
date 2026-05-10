@@ -1,3 +1,30 @@
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtCore import Qt
+
+def apply_light_theme(app):
+    """
+    Força o tema claro e o estilo Fusion na aplicação, 
+    garantindo consistência entre Windows 10 e 11.
+    """
+    app.setStyle("Fusion")
+    
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(240, 240, 240))
+    palette.setColor(QPalette.WindowText, Qt.black)
+    palette.setColor(QPalette.Base, Qt.white)
+    palette.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
+    palette.setColor(QPalette.ToolTipBase, Qt.white)
+    palette.setColor(QPalette.ToolTipText, Qt.black)
+    palette.setColor(QPalette.Text, Qt.black)
+    palette.setColor(QPalette.Button, QColor(240, 240, 240))
+    palette.setColor(QPalette.ButtonText, Qt.black)
+    palette.setColor(QPalette.BrightText, Qt.red)
+    palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.HighlightedText, Qt.white)
+    
+    app.setPalette(palette)
+
 STYLE_SHEET = """
 QMainWindow { 
     background-color: #f3f3f9; 
@@ -107,7 +134,7 @@ QHeaderView::section {
     border: none;
 }
 
-/* Barra de Progresso */
+/* Estilo da Barra de Progresso */
 QProgressBar {
     background-color: #e0e0e0;
     color: white;
@@ -118,5 +145,36 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #f77965;
     border-radius: 5px;
+}
+
+/* NOVIDADE: Adicione estas linhas antes de fechar as aspas triplas */
+
+#AlaContainer {
+    padding: 10px; 
+    background-color: rgba(255, 255, 255, 0.08); 
+    margin: 10px;
+    border-radius: 8px;
+}
+
+#AlaLabel {
+    font-size: 11px; 
+    font-weight: bold; 
+    color: #ffffff;  /* Branco para contraste total */
+    background: transparent;
+}
+
+#AlaSelector {
+    border: 1px solid #4b5263;
+    border-radius: 4px;
+    padding: 5px;
+    background-color: #1e2227;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+#AlaSelector QAbstractItemView {
+    background-color: #2d4157;
+    color: white;
+    selection-background-color: #f77965;
 }
 """
