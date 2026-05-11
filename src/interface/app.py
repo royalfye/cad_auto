@@ -29,7 +29,7 @@ from src.processing.services import (
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QMessageBox
+    QMessageBox, QStackedWidget
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -38,7 +38,8 @@ from src.interface.workers import AutomationWorker
 from src.interface.sidebar import SideBar
 from src.interface.table_model import OcorrenciaTableModel
 from src.interface.pages.active_calls_page import ActiveCallsPage
-
+from src.processing.log_service import ocorrencia_ja_disparada, registrar_disparo
+from src.interface.pages.process_page import ProcessPage
 #2 - Class
 class FireApp(QMainWindow):
     def __init__(self):
@@ -75,19 +76,18 @@ class FireApp(QMainWindow):
         self.layout_geral.setContentsMargins(0, 0, 0, 0)
         self.layout_geral.setSpacing(0)
 
-        # Inicializa Componentes
-        self._create_sidebar()
-        self._create_main_content_area()
+        # Inicializa Componentes (A ORDEM FOI INVERTIDA AQUI)
+        self._create_main_content_area() # PRIMEIRO criamos o baralho
+        self._create_sidebar()           # DEPOIS criamos a Sidebar e conectamos ao baralho
         
         # Montagem Final
         self.layout_geral.addWidget(self.sidebar)
         self.layout_geral.addWidget(self.content_area)
 
     def _create_sidebar(self):
-        """Cria e configura a barra lateral."""
-        self.sidebar = SideBar(switch_page_callback=lambda: None)
-        self.sidebar.btn_extracao.hide()
-        self.sidebar.btn_process.hide()
+        # O callback diz à Sidebar: "Quando um botão for clicado, mude o índice do meu baralho"
+        self.sidebar = SideBar(switch_page_callback=self.page_manager.setCurrentIndex)
+        self.layout_geral.addWidget(self.sidebar)
 
     def _create_main_content_area(self):
         """Cria a área onde as tabelas e botões de ação ficam."""
@@ -96,14 +96,23 @@ class FireApp(QMainWindow):
         self.content_layout.setContentsMargins(30, 30, 30, 30)
         self.content_layout.setSpacing(20)
 
+        self.page_manager = QStackedWidget()
+        self.content_layout.addWidget(self.page_manager)
         self.monitor_page = ActiveCallsPage()
+        
+        self.page_manager.addWidget(self.monitor_page)
+
+        self.process_page = ProcessPage()
+        self.page_manager.addWidget(self.process_page)
+
+        # --- AVISO: NÃO APAGUE ISSO AINDA ---
+        # Mantemos essas referências temporariamente para não quebrar o resto do seu código
         self.header = self.monitor_page.header
         self.status_frame = self.monitor_page.status_frame
         self.status_msg = self.monitor_page.status_msg
         self.progress_bar = self.monitor_page.progress_bar
         self.table_ativas = self.monitor_page.table_ativas
         self.summary_card = self.monitor_page.summary_card
-        self.content_layout.addWidget(self.monitor_page)
 
     def _connect_signals(self):
         """Connects page controls to application actions."""
@@ -366,22 +375,6 @@ class FireApp(QMainWindow):
         # Usamos o QTimer para dar 1 segundo de respiro para o sistema
         QTimer.singleShot(1000, self.run_active_sync)
 
-    def _ocorrencia_ja_disparada(self, call_id):
-        """Verifica se o ID da chamada já consta no arquivo de log."""
-        log_path = Path(ROOT_DIR) / "data" / "disparados.log"
-        if not log_path.exists():
-            return False
-        with open(log_path, "r") as f:
-            ids_enviados = f.read().splitlines()
-        return str(call_id) in ids_enviados
-
-    def _registrar_disparo(self, call_id):
-        """Salva o ID da chamada no arquivo de log para evitar duplicidade."""
-        log_path = Path(ROOT_DIR) / "data" / "disparados.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a") as f:
-            f.write(f"{call_id}\n")
-
     def _on_automation_finished(self, success, message):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
@@ -404,13 +397,13 @@ class FireApp(QMainWindow):
                     call_id = ultima_oc.id_chamada
 
                     # 2. Verificamos se já foi disparada (Memória do Log)
-                    if not self._ocorrencia_ja_disparada(call_id):
+                    if not ocorrencia_ja_disparada(call_id):
                         # Marca visualmente na tabela
                         ultima_oc.selecionado = True
                         self.model.layoutChanged.emit()
                         
                         # Registra o ID no log para não repetir e dispara
-                        self._registrar_disparo(call_id)
+                        registrar_disparo(call_id)
                         self._update_status(f"🚀 Nova ocorrência detectada: {call_id}")
                         
                         # Disparo automático para o WhatsApp
