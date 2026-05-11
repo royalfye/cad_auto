@@ -19,33 +19,25 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import webbrowser
-import pandas as pd
-from pynput import mouse, keyboard # Instale com: pip install pynput
+from src.bot.cad_bot import CADAutomationBot
+from src.processing.data_handler import DataProcessor
+from src.processing.services import (
+    converter_dataframe_para_objetos, 
+    generate_activity_report,
+    obter_nome_grupo_whatsapp
+)
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFrame, QProgressBar, QTableView, QTextEdit,
     QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer
 
-from src.bot.cad_bot import CADAutomationBot
-from src.bot.history_bot import HistoryBot
-from src.processing.data_handler import DataProcessor
-from src.processing.services import (
-    converter_dataframe_para_objetos, 
-    generate_activity_report
-)
 from src.interface.styles import STYLE_SHEET, apply_light_theme
 from src.interface.workers import AutomationWorker
 from src.interface.sidebar import SideBar
 from src.interface.table_model import OcorrenciaTableModel
-from src.interface.components.active_table import ActiveCallsTable
-from src.interface.components.summary_card import SummaryCard
-from src.interface.components.header import HeaderSection
-from src.processing.services import obter_nome_grupo_whatsapp
-from src.bot.whatsapp_bot import WhatsAppBot
-from src.bot.sentinel_worker import SentinelWorker
+from src.interface.pages.active_calls_page import ActiveCallsPage
 
 #2 - Class
 class FireApp(QMainWindow):
@@ -54,6 +46,9 @@ class FireApp(QMainWindow):
         # 1. Inicialização de instâncias (Lógica de Negócio)
         self.processor = DataProcessor()
         self.bot = CADAutomationBot()
+        self.model = None
+        self.sentinela_ativa = False
+        self.sentinel_thread = None
         
         # 2. Configurações da Janela Principal
         self._configure_window()
@@ -62,12 +57,8 @@ class FireApp(QMainWindow):
         self._setup_ui()
         
         # 4. Inicialização de Modelos (Dados vazios para começar)
-        self.model = None
-
+        self._connect_signals()
         self.carregar_chamadas_ativas()
-
-        self.header.play_toggled.connect(self.gerenciar_sentinela)
-        self.sentinela_ativa = False
 
     def _configure_window(self):
         """Configurações básicas da janela principal."""
@@ -105,9 +96,22 @@ class FireApp(QMainWindow):
         self.content_layout.setContentsMargins(30, 30, 30, 30)
         self.content_layout.setSpacing(20)
 
-        # Adiciona a página de processamento
-        self.monitor_page = self.create_processing_page() # Este método vamos refatorar no próximo passo
+        self.monitor_page = ActiveCallsPage()
+        self.header = self.monitor_page.header
+        self.status_frame = self.monitor_page.status_frame
+        self.status_msg = self.monitor_page.status_msg
+        self.progress_bar = self.monitor_page.progress_bar
+        self.table_ativas = self.monitor_page.table_ativas
+        self.summary_card = self.monitor_page.summary_card
         self.content_layout.addWidget(self.monitor_page)
+
+    def _connect_signals(self):
+        """Connects page controls to application actions."""
+        self.header.btn_history.clicked.connect(self.iniciar_busca_historico)
+        self.header.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
+        self.header.btn_send.clicked.connect(self.disparar_whatsapp_automático)
+        self.header.btn_sync.clicked.connect(self.run_active_sync)
+        self.header.play_toggled.connect(self.gerenciar_sentinela)
 
     def switch_page_dummy(self, index):
         """Função vazia apenas para evitar erros na Sidebar."""
@@ -149,6 +153,8 @@ class FireApp(QMainWindow):
         if not self.sentinela_ativa: return
         
         self._update_status("🛰️ Sentinela: Monitorando tabela...")
+        from src.bot.sentinel_worker import SentinelWorker
+
         self.sentinel_thread = SentinelWorker()
         self.sentinel_thread.new_occurrence_detected.connect(self._reagir_a_nova_ocorrencia)
         self.sentinel_thread.finished_by_user.connect(self._on_sentinel_stopped)
@@ -174,53 +180,8 @@ class FireApp(QMainWindow):
     def _on_sentinel_stopped(self, reason):
         """Callback para quando o sentinela para via hardware (mouse/ESC)."""
         self.sentinela_ativa = False
-        # Força o botão do Header a voltar para o estado de "Play"
-        self.header.is_monitoring = False
-        self.header._toggle_state()
+        self.header.set_monitoring_state(False, emit_signal=False)
         self._update_status(f"⚪ Sentinela parado por: {reason}")
-
-    
-
-    def create_processing_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        
-        # Instancia o novo componente
-        self.header = HeaderSection()
-        
-        # CONEXÃO DOS BOTÕES (O "pulo do gato")
-        # Como os botões agora estão dentro de 'self.header', acessamos assim:
-        self.header.btn_history.clicked.connect(self.iniciar_busca_historico)
-        self.header.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
-        self.header.btn_send.clicked.connect(self.disparar_whatsapp_automático) 
-        self.header.btn_sync.clicked.connect(self.run_active_sync)
-
-        self.status_section = self._create_status_section()
-        self.table_ativas = ActiveCallsTable()
-        self.summary_card = SummaryCard()
-
-        # Adição ao layout
-        layout.addWidget(self.header) # Adiciona o componente direto como Widget
-        layout.addWidget(self.status_section)
-        layout.addWidget(self.table_ativas, 1)
-        layout.addWidget(self.summary_card)
-
-        return page
-
-    def _create_status_section(self):
-        """Cria a barra de progresso e mensagens de status."""
-        self.status_frame = QFrame()
-        self.status_frame.setObjectName("Card")
-        self.status_frame.setVisible(False)
-        
-        layout = QVBoxLayout(self.status_frame)
-        self.status_msg = QLabel("Pronto...")
-        self.progress_bar = QProgressBar()
-        
-        layout.addWidget(self.status_msg)
-        layout.addWidget(self.progress_bar)
-        
-        return self.status_frame
 
     def run_active_sync(self):
         """Inicia a sincronização de chamadas ativas com proteção contra erros."""
@@ -261,6 +222,8 @@ class FireApp(QMainWindow):
         self._update_status(f"🤖 [{len(fila)+1} restantes] Buscando histórico: {call_id}")
         
         # Disparamos o Worker para esta ocorrência específica
+        from src.bot.history_bot import HistoryBot
+
         self.h_bot = HistoryBot()
         self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
         
@@ -328,6 +291,8 @@ class FireApp(QMainWindow):
 
         self.status_frame.setVisible(True)
         self._update_status(f"🚀 Disparando para {grupo_destino}...")
+
+        from src.bot.whatsapp_bot import WhatsAppBot
 
         # Instancia o bot do zap
         ws_bot = WhatsAppBot()
@@ -515,3 +480,5 @@ if __name__ == "__main__":
     window = FireApp()
     window.show()
     sys.exit(app.exec())
+
+# Comentario de teste 3: robos carregados sob demanda pelo Codex.

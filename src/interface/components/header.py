@@ -61,8 +61,12 @@ class HeaderSection(QWidget):
 
     def _toggle_state(self):
         """Alterna visualmente e logicamente entre Play e Stop."""
-        self.is_monitoring = not self.is_monitoring
-        
+        self.set_monitoring_state(not self.is_monitoring)
+
+    def set_monitoring_state(self, is_monitoring: bool, emit_signal: bool = True):
+        """Define o estado visual do sentinela sem depender de alternância."""
+        self.is_monitoring = is_monitoring
+
         if self.is_monitoring:
             self.btn_sentinel.setText("⏹️ Parar Sentinela")
             # Vermelho para indicar perigo/parada
@@ -72,5 +76,5 @@ class HeaderSection(QWidget):
             # Cinza azulado para indicar prontidão
             self.btn_sentinel.setStyleSheet("background-color: #4b5263; color: white;")
             
-        # Emite o sinal para o App.py saber que deve ligar/desligar o robô
-        self.play_toggled.emit(self.is_monitoring)
+        if emit_signal:
+            self.play_toggled.emit(self.is_monitoring)
