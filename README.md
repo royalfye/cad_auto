@@ -33,17 +33,37 @@ cad_auto/
 ├── assets/
 │   ├── images/
 │   │   └── cad_targets/
+│   │       ├── 01_filter_passos_active.png
+│   │       ├── 02_chamadas_button.png
+│   │       ├── 03_pesquisa_button.png
+│   │       ├── 04_classificadas_button.png
+│   │       ├── 05_ultimas_24_button.png
+│   │       ├── 06_ultimos_3_button.png
+│   │       ├── 07_filtro_passos.button.png
+│   │       ├── 08_passos_button.png
+│   │       ├── 09_exportar_button.png
+│   │       ├── 10_ativas_button.png
+│   │       ├── 11_call_number_ref.png
+│   │       ├── 12_historico_button_01.png
+│   │       ├── 12_historico_button_02.png
+│   │       ├── 13_pencil_button.png
+│   │       └── 14_tabela_header.png
 │   └── styles.qss
 ├── data/
 ├── src/
 │   ├── bot/
 │   │   ├── cad_bot.py
-│   │   └── history_bot.py
+│   │   ├── history_bot.py
+│   │   ├── sentinel_worker.py
+│   │   └── whatsapp_bot.py
 │   ├── interface/
 │   │   ├── components/
 │   │   │   ├── active_table.py
 │   │   │   ├── header.py
 │   │   │   └── summary_card.py
+│   │   ├── pages/
+│   │   │   ├── __init__.py
+│   │   │   └── active_calls_page.py
 │   │   ├── app.py
 │   │   ├── models.py
 │   │   ├── sidebar.py
@@ -52,6 +72,7 @@ cad_auto/
 │   │   └── workers.py
 │   ├── processing/
 │   │   ├── data_handler.py
+│   │   ├── data_handler_vehicles.py
 │   │   ├── models.py
 │   │   └── services.py
 │   ├── utils/

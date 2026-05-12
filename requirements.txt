@@ -7,3 +7,4 @@ pywin32
 pywinauto
 easyocr
 pynput
+openpyxl
