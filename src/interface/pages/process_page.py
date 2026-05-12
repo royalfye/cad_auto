@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
 
 from PySide6.QtCore import Qt
 
+from src.processing.data_handler_vehicles import VehicleDataProcessor
+
 class MotoristaDelegate(QStyledItemDelegate):
     def __init__(self, mapa_motoristas, parent=None):
         super().__init__(parent)
@@ -75,6 +77,13 @@ class ProcessPage(QWidget):
         self.btn_siad.clicked.connect(self.gerar_csv_siad)
 
     def carregar_dados(self):
+
+        try:
+            processador_viaturas = VehicleDataProcessor()
+            processador_viaturas.process_vehicle_table()
+        except Exception as e:
+            QMessageBox.warning(self, "Aviso", f"Não foi possível processar os arquivos novos:\n{e}")
+            
         if not self.csv_path.exists():
             QMessageBox.warning(self, "Aviso", "Arquivo CSV não encontrado.")
             return

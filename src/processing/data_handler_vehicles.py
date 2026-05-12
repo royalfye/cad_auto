@@ -38,7 +38,8 @@ class VehicleDataProcessor:
             "Recursos empenhados": "Recurso",
             "Data/hora de criação": "Saída",
             "Data/hora da situação atual": "Chegada",
-            "Local do fato": "Endereço"
+            "Local do fato": "Endereço",
+            "Unidade Responsável": "Unidade"
         }
 
     def process_vehicle_table(self) -> Optional[pd.DataFrame]:
@@ -85,6 +86,9 @@ class VehicleDataProcessor:
 
             # 5. Criar novo DataFrame
             df_vehicle = df[existing_cols].rename(columns=self.column_map)
+
+            if 'Unidade' in df_vehicle.columns:
+                df_vehicle = df_vehicle[df_vehicle['Unidade'].str.contains('PASSOS', case=False, na=False)].copy()
 
             # Converter colunas de data para datetime real
             for col in ["Saída", "Chegada"]:
