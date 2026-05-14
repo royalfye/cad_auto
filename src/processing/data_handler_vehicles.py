@@ -90,6 +90,22 @@ class VehicleDataProcessor:
             if 'Unidade' in df_vehicle.columns:
                 df_vehicle = df_vehicle[df_vehicle['Unidade'].str.contains('PASSOS', case=False, na=False)].copy()
 
+            # --- NOVO BLOCO: SEPARAR MÚLTIPLAS VIATURAS (EXPLODE) ---
+            # 1. Transforma a string "ASL / UR" em uma lista ["ASL", " UR"] separando pela barra
+            df_vehicle['Recurso'] = df_vehicle['Recurso'].astype(str).str.split('/')
+            
+            # 2. Explode a lista: cria uma linha idêntica para cada viatura da lista
+            df_vehicle = df_vehicle.explode('Recurso')
+            
+            # 3. Limpa espaços em branco acidentais (ex: " UR04360 " vira "UR04360")
+            df_vehicle['Recurso'] = df_vehicle['Recurso'].str.strip()
+            
+            # 4. Remove linhas onde a viatura ficou vazia (caso houvesse duas barras "//")
+            df_vehicle = df_vehicle[df_vehicle['Recurso'] != ""]
+            
+            # 5. Remove qualquer texto residual como "nan" (vazio do pandas)
+            df_vehicle = df_vehicle[df_vehicle['Recurso'] != "nan"]
+
             # Converter colunas de data para datetime real
             for col in ["Saída", "Chegada"]:
 
