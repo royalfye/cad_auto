@@ -40,6 +40,10 @@ from src.interface.table_model import OcorrenciaTableModel
 from src.interface.pages.active_calls_page import ActiveCallsPage
 from src.processing.log_service import ocorrencia_ja_disparada, registrar_disparo
 from src.interface.pages.process_page import ProcessPage
+from src.bot.sentinel_worker import SentinelWorker
+from src.bot.history_bot import HistoryBot
+from src.bot.whatsapp_bot import WhatsAppBot
+
 #2 - Class
 class FireApp(QMainWindow):
     def __init__(self):
@@ -105,22 +109,13 @@ class FireApp(QMainWindow):
         self.process_page = ProcessPage()
         self.page_manager.addWidget(self.process_page)
 
-        # --- AVISO: NÃO APAGUE ISSO AINDA ---
-        # Mantemos essas referências temporariamente para não quebrar o resto do seu código
-        self.header = self.monitor_page.header
-        self.status_frame = self.monitor_page.status_frame
-        self.status_msg = self.monitor_page.status_msg
-        self.progress_bar = self.monitor_page.progress_bar
-        self.table_ativas = self.monitor_page.table_ativas
-        self.summary_card = self.monitor_page.summary_card
-
     def _connect_signals(self):
-        """Connects page controls to application actions."""
-        self.header.btn_history.clicked.connect(self.iniciar_busca_historico)
-        self.header.btn_copy.clicked.connect(self.copiar_ocorrencia_selecionada)
-        self.header.btn_send.clicked.connect(self.disparar_whatsapp_automático)
-        self.header.btn_sync.clicked.connect(self.run_active_sync)
-        self.header.play_toggled.connect(self.gerenciar_sentinela)
+        """Connects page controls to application actions via Signals."""
+        self.monitor_page.solicitou_historico.connect(self.iniciar_busca_historico)
+        self.monitor_page.solicitou_copia.connect(self.copiar_ocorrencia_selecionada)
+        self.monitor_page.solicitou_disparo.connect(self.disparar_whatsapp_automático)
+        self.monitor_page.solicitou_sincronizacao.connect(self.run_active_sync)
+        self.monitor_page.solicitou_sentinela.connect(self.gerenciar_sentinela)
 
     def switch_page_dummy(self, index):
         """Função vazia apenas para evitar erros na Sidebar."""
@@ -162,7 +157,6 @@ class FireApp(QMainWindow):
         if not self.sentinela_ativa: return
         
         self._update_status("🛰️ Sentinela: Monitorando tabela...")
-        from src.bot.sentinel_worker import SentinelWorker
 
         self.sentinel_thread = SentinelWorker()
         self.sentinel_thread.new_occurrence_detected.connect(self._reagir_a_nova_ocorrencia)
@@ -189,7 +183,7 @@ class FireApp(QMainWindow):
     def _on_sentinel_stopped(self, reason):
         """Callback para quando o sentinela para via hardware (mouse/ESC)."""
         self.sentinela_ativa = False
-        self.header.set_monitoring_state(False, emit_signal=False)
+        self.monitor_page.atualizar_estado_sentinela(False, emitir_sinal=False)
         self._update_status(f"⚪ Sentinela parado por: {reason}")
 
     def run_active_sync(self):
@@ -231,7 +225,6 @@ class FireApp(QMainWindow):
         self._update_status(f"🤖 [{len(fila)+1} restantes] Buscando histórico: {call_id}")
         
         # Disparamos o Worker para esta ocorrência específica
-        from src.bot.history_bot import HistoryBot
 
         self.h_bot = HistoryBot()
         self.worker = AutomationWorker(self.h_bot.capturar_historico_por_id, call_id)
@@ -270,20 +263,15 @@ class FireApp(QMainWindow):
             return
 
         try:
-            # 3. Geramos o texto passando a ala_selecionada como argumento
-            # Agora o método formatar_para_whatsapp(equipe=...) recebe o valor correto
             lista_textos = [
                 oc.formatar_para_whatsapp(equipe=ala_selecionada) 
                 for oc in selecionadas
             ]
-            
             texto_final = "\n\n---\n\n".join(lista_textos)
-            
             QApplication.clipboard().setText(texto_final)
             
-            # Feedback visual
-            self.header.btn_copy.setText(f"✅ {len(selecionadas)} Copiadas!")
-            QTimer.singleShot(2000, lambda: self.header.btn_copy.setText("📋 Copiar para WhatsApp"))
+            # SUBSTITUA AS DUAS LINHAS DO FEEDBACK VISUAL POR ESTA:
+            self.monitor_page.exibir_feedback_copia(len(selecionadas))
             
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Não foi possível copiar: {e}")
@@ -298,10 +286,8 @@ class FireApp(QMainWindow):
         # A função que você criou no services.py
         grupo_destino = obter_nome_grupo_whatsapp(ala_sel) 
 
-        self.status_frame.setVisible(True)
+        # A LINHA QUE DAVA ERRO FOI APAGADA AQUI!
         self._update_status(f"🚀 Disparando para {grupo_destino}...")
-
-        from src.bot.whatsapp_bot import WhatsAppBot
 
         # Instancia o bot do zap
         ws_bot = WhatsAppBot()
@@ -320,26 +306,23 @@ class FireApp(QMainWindow):
             df = self.processor.process_latest_active_call()
             
             if df is not None and not df.empty:
-                # 1. Prepara os dados
+                # 1. Prepara os dados (A lógica de negócio continua igual)
                 lista_objetos = converter_dataframe_para_objetos(df)
                 self.model = OcorrenciaTableModel(lista_objetos)
                 
-                # 2. Distribui para os componentes
+                # 2. Distribui para os componentes (AQUI MUDA!)
                 report_text = generate_activity_report(df)
-                self.summary_card.update_text(report_text)
-                self.table_ativas.update_data(self.model)
                 
-                # --- O PULO DO GATO ---
-                # Antes de conectar, tentamos desconectar conexões antigas para não duplicar
-                try:
-                    self.table_ativas.clicked.disconnect()
-                except Exception:
-                    # Se não houver conexão para desconectar, ele apenas segue
-                    pass
+                # Em vez de self.summary_card.update_text(...), usamos a nova porta:
+                self.monitor_page.atualizar_resumo(report_text)
                 
-                # Agora conectamos o clique ao novo modelo carregado
-                self.table_ativas.clicked.connect(self._toggle_row_checkbox)
-                # ----------------------
+                # A página recebe o modelo e atualiza a tabela
+                self.monitor_page.table_ativas.update_data(self.model)
+                
+                # --- O PULO DO GATO AGORA FICA RESUMIDO A UMA LINHA ---
+                # Aquele bloco inteiro de try/except foi movido para dentro desta função abaixo:
+                self.monitor_page.associar_tabela_clique(self._toggle_row_checkbox)
+                # ------------------------------------------------------
 
                 self._update_status("📂 Dados atualizados com sucesso.")
             else:
@@ -350,13 +333,12 @@ class FireApp(QMainWindow):
 
     def _update_status(self, message):
         """Método auxiliar para atualizar a barra de status."""
-        self.status_frame.setVisible(True)
-        self.status_msg.setText(message)
+        self.monitor_page.exibir_status(message)
 
     def _start_automation_task(self, func, *args):
         """Orquestrador genérico para tarefas do robô."""
         self._update_status("🤖 Bot em ação...")
-        self.progress_bar.setRange(0, 0)
+        self.monitor_page.configurar_progresso(0, 0)
         self.worker = AutomationWorker(func, *args)
         self.worker.finished.connect(self._on_automation_finished)
         self.worker.start()
@@ -376,8 +358,8 @@ class FireApp(QMainWindow):
         QTimer.singleShot(1000, self.run_active_sync)
 
     def _on_automation_finished(self, success, message):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
+        
+        self.monitor_page.configurar_progresso(0, 100, 100)
         
         if success:
             self._update_status("✅ Dados sincronizados!")
@@ -436,8 +418,10 @@ class FireApp(QMainWindow):
 
     def _on_history_finished(self, success, result, occurrence):
         """Trata o retorno da busca de histórico (OCR)."""
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
+        
+        # AGORA USAMOS A PORTA CORRETA PARA A BARRA DE PROGRESSO:
+        self.monitor_page.configurar_progresso(0, 100, 100)
+        
         if success:
             occurrence.historico = result
             self._update_status("✅ Histórico capturado!")

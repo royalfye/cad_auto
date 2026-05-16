@@ -100,11 +100,33 @@ class ProcessPage(QWidget):
 
         # Carrega o efetivo UMA VEZ antes de montar as abas para não pesar o programa
         self.carregar_efetivo()
+        self.carregar_info_viaturas()
 
         for recurso, df_grupo in grupos_viaturas:
             # --- Container da Aba ---
             aba_widget = QWidget()
             aba_layout = QVBoxLayout(aba_widget)
+
+            info_layout = QHBoxLayout()
+            
+            # Buscamos as informações. Se não achar, avisa visualmente.
+            placa = getattr(self, 'mapa_placas', {}).get(recurso, "PLACA NÃO CADASTRADA")
+            descricao = getattr(self, 'mapa_descricoes', {}).get(recurso, "DESCRIÇÃO NÃO CADASTRADA")
+            
+            # O pulo do gato: TextSelectableByMouse permite selecionar e dar Ctrl+C
+            lbl_desc = QLabel(f"📝 Descrição: {descricao}")
+            lbl_desc.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            lbl_desc.setStyleSheet("font-size: 13px; font-weight: bold; color: #34495e; padding: 5px;")
+            
+            lbl_placa = QLabel(f"🏷️ Placa: {placa}")
+            lbl_placa.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            lbl_placa.setStyleSheet("font-size: 13px; font-weight: bold; color: #2980b9; padding: 5px;")
+            
+            info_layout.addWidget(lbl_desc)
+            info_layout.addWidget(lbl_placa)
+            info_layout.addStretch()
+            
+            aba_layout.addLayout(info_layout)
 
             # --- Painel de Estimativa de KM (Barra superior da aba) ---
             km_panel = QHBoxLayout()
@@ -268,22 +290,6 @@ class ProcessPage(QWidget):
         
         # 1. Ajustamos o caminho para a pasta correta e o formato .xlsx
         caminho_pessoal = Path(__file__).resolve().parent.parent.parent.parent / "data" / "02_silver" / "personal_info.xlsx"
-
-        self.mapa_placas = {
-            "ABT00816": "HMH3919",
-            "ASL07161": "TEH7B61",
-            "UR04360": "QXW4D60",
-            "VOB00480": "SYZ0E80"
-            # Você pode adicionar as outras viaturas da 2ª CIA aqui depois
-        }
-
-        self.mapa_placas = {
-            "ABT00816": "HMH3919",
-            "ASL07161": "TEH7B61",
-            "UR04360": "QXW4D60",
-            "VOB00480": "SYZ0E80"
-            # Conforme descobrir as outras, é só adicionar aqui!
-        }
         
         self.mapa_motoristas = {} # Dicionário para traduzir Nome de Guerra -> Nome Completo
         lista_formatada = [""] # Começa com uma opção vazia
@@ -304,6 +310,34 @@ class ProcessPage(QWidget):
         except Exception as e:
             print(f"Erro ao carregar efetivo: {e}")
             return [""]
+    
+    def carregar_info_viaturas(self):
+        """Lê o arquivo vehicles_info.xlsx e armazena placas e descrições."""
+        caminho_viaturas = Path(__file__).resolve().parent.parent.parent.parent / "data" / "02_silver" / "vehicles_info.xlsx"
+        
+        # Inicializamos os dicionários
+        self.mapa_placas = {}
+        self.mapa_descricoes = {}
+
+        if not caminho_viaturas.exists():
+            print(f"Aviso: Arquivo de viaturas não encontrado em {caminho_viaturas}")
+            return
+
+        try:
+            # header=None indica ao Pandas que a primeira linha já é dado, não cabeçalho
+            df_viaturas = pd.read_excel(caminho_viaturas, header=None)
+            
+            for _, row in df_viaturas.iterrows():
+                # row[0] = Código, row[1] = Placa, row[2] = Descrição
+                codigo = str(row[0]).strip()
+                placa = str(row[1]).strip()
+                descricao = str(row[2]).strip()
+                
+                self.mapa_placas[codigo] = placa
+                self.mapa_descricoes[codigo] = descricao
+                
+        except Exception as e:
+            print(f"Erro ao carregar informações das viaturas: {e}")
         
     def gerar_csv_siad(self):
         """Gera arquivos CSV simplificados e separados por viatura para o UI.Vision."""
@@ -328,6 +362,7 @@ class ProcessPage(QWidget):
                 headers = [tabela.horizontalHeaderItem(c).text() for c in range(tabela.columnCount())]
                 
                 # Encontra onde estão as colunas que nos interessam
+                idx_data = headers.index("Data") if "Data" in headers else -1 # <--- Busca a nova coluna
                 idx_saida = headers.index("Saída") if "Saída" in headers else -1
                 idx_km_saida = headers.index("Km Saída") if "Km Saída" in headers else -1
                 idx_km_cheg = headers.index("Km Chegada") if "Km Chegada" in headers else -1
@@ -336,15 +371,12 @@ class ProcessPage(QWidget):
                 dados_siad = []
                 
                 for r in range(rows):
-                    # 1. Tratar Data e Hora
-                    saida_raw = tabela.item(r, idx_saida).text() if idx_saida != -1 and tabela.item(r, idx_saida) else ""
-                    data_atendimento = ""
-                    hora_atendimento = ""
+                    # 1. Pegar Data e Hora (já estão separados na tabela!)
+                    data_atendimento = tabela.item(r, idx_data).text() if idx_data != -1 and tabela.item(r, idx_data) else ""
                     
-                    if " " in saida_raw:
-                        partes = saida_raw.split(" ")
-                        data_atendimento = partes[0]       # Extrai só "10/05/2026"
-                        hora_atendimento = partes[1][:5]   # Extrai só "10:03" (corta os segundos)
+                    # Pega a hora cheia (ex: 11:24:00) e corta os últimos 3 caracteres para o SIAD (ex: 11:24)
+                    hora_cheia = tabela.item(r, idx_saida).text() if idx_saida != -1 and tabela.item(r, idx_saida) else ""
+                    hora_atendimento = hora_cheia[:5] if hora_cheia else ""
 
                     # 2. Pegar Quilometragens
                     km_ini = tabela.item(r, idx_km_saida).text() if idx_km_saida != -1 and tabela.item(r, idx_km_saida) else ""
