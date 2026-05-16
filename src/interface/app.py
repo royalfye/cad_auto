@@ -286,7 +286,7 @@ class FireApp(QMainWindow):
         # A função que você criou no services.py
         grupo_destino = obter_nome_grupo_whatsapp(ala_sel) 
 
-        self.status_frame.setVisible(True)
+        # A LINHA QUE DAVA ERRO FOI APAGADA AQUI!
         self._update_status(f"🚀 Disparando para {grupo_destino}...")
 
         # Instancia o bot do zap
@@ -418,8 +418,10 @@ class FireApp(QMainWindow):
 
     def _on_history_finished(self, success, result, occurrence):
         """Trata o retorno da busca de histórico (OCR)."""
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
+        
+        # AGORA USAMOS A PORTA CORRETA PARA A BARRA DE PROGRESSO:
+        self.monitor_page.configurar_progresso(0, 100, 100)
+        
         if success:
             occurrence.historico = result
             self._update_status("✅ Histórico capturado!")

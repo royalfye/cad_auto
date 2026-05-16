@@ -44,12 +44,9 @@ class VehicleDataProcessor:
 
     def process_vehicle_table(self) -> Optional[pd.DataFrame]:
 
-
         # 1. Procurar arquivos CSV
         files = list(self.bronze_path.glob("*.csv"))
-
         print(self.bronze_path)
-
         print(files)
 
         if not files:
@@ -58,13 +55,10 @@ class VehicleDataProcessor:
 
         # 2. Pegar arquivo mais recente
         latest_file = max(files, key=lambda f: f.stat().st_mtime)
-
         print(latest_file)
-
         logging.info(f"Processando: {latest_file.name}")
 
         try:
-
             # 3. Ler CSV
             df = pd.read_csv(
                 latest_file,
@@ -73,7 +67,6 @@ class VehicleDataProcessor:
                 on_bad_lines='skip'
             )
 
-
             print(df.head())
 
             # 4. Selecionar colunas existentes
@@ -81,7 +74,6 @@ class VehicleDataProcessor:
                 col for col in self.column_map.keys()
                 if col in df.columns
             ]
-
             print(existing_cols)
 
             # 5. Criar novo DataFrame
@@ -90,37 +82,25 @@ class VehicleDataProcessor:
             if 'Unidade' in df_vehicle.columns:
                 df_vehicle = df_vehicle[df_vehicle['Unidade'].str.contains('PASSOS', case=False, na=False)].copy()
 
-            # --- NOVO BLOCO: SEPARAR MÚLTIPLAS VIATURAS (EXPLODE) ---
-            # 1. Transforma a string "ASL / UR" em uma lista ["ASL", " UR"] separando pela barra
+            # --- BLOCO: SEPARAR MÚLTIPLAS VIATURAS (EXPLODE) ---
             df_vehicle['Recurso'] = df_vehicle['Recurso'].astype(str).str.split('/')
-            
-            # 2. Explode a lista: cria uma linha idêntica para cada viatura da lista
             df_vehicle = df_vehicle.explode('Recurso')
-            
-            # 3. Limpa espaços em branco acidentais (ex: " UR04360 " vira "UR04360")
             df_vehicle['Recurso'] = df_vehicle['Recurso'].str.strip()
-            
-            # 4. Remove linhas onde a viatura ficou vazia (caso houvesse duas barras "//")
             df_vehicle = df_vehicle[df_vehicle['Recurso'] != ""]
-            
-            # 5. Remove qualquer texto residual como "nan" (vazio do pandas)
             df_vehicle = df_vehicle[df_vehicle['Recurso'] != "nan"]
 
-            # Converter colunas de data para datetime real
+            # Converter colunas de data para datetime real para podermos fazer cálculos matemáticos
             for col in ["Saída", "Chegada"]:
-
                 if col in df_vehicle.columns:
-
                     df_vehicle[col] = pd.to_datetime(
                         df_vehicle[col],
                         dayfirst=True,
                         errors="coerce"
-        )
+                    )
                     
+            # Filtra apenas os últimos 30 dias (ou o valor de MAX_ACTIVE_DAYS)
             limite_data = datetime.now() - timedelta(days=MAX_ACTIVE_DAYS)
-            df_vehicle = df_vehicle[
-                df_vehicle["Saída"] >= limite_data
-]
+            df_vehicle = df_vehicle[df_vehicle["Saída"] >= limite_data]
 
             # 6. Criar colunas vazias
             df_vehicle["Km Saída"] = ""
@@ -131,22 +111,23 @@ class VehicleDataProcessor:
             df_vehicle = df_vehicle.sort_values(
                 by=["Recurso", "Saída"],
                 ascending=[True, True]
-)
+            )
             
+            # --- NOVO BLOCO: SEPARAR DATA E HORA ---
+            # Primeiro, extraímos apenas o Dia/Mês/Ano para a nova coluna 'Data'
+            df_vehicle['Data'] = df_vehicle['Saída'].dt.strftime("%d/%m/%Y")
 
-            # Voltar datas para formato brasileiro
+            # Depois, transformamos as colunas originais para exibir apenas Hora:Minuto:Segundo
             for col in ["Saída", "Chegada"]:
-
                 if col in df_vehicle.columns:
-
-                    df_vehicle[col] = df_vehicle[col].dt.strftime(
-                        "%d/%m/%Y %H:%M:%S"
-        )
+                    df_vehicle[col] = df_vehicle[col].dt.strftime("%H:%M:%S")
+            # ---------------------------------------
 
             # 7. Organizar ordem das colunas
             final_columns = [
                 "ID",
                 "Recurso",
+                "Data",
                 "Saída",
                 "Chegada",
                 "Km Saída",
@@ -160,24 +141,19 @@ class VehicleDataProcessor:
 
             # 8. Salvar CSV
             output_path = self.silver_path / "vehicle_calls.csv"
-
             df_vehicle.to_csv(
                 output_path,
                 index=False,
                 encoding='utf-8-sig'
             )
             print(output_path)
-
             logging.info(f"Tabela salva em: {output_path}")
 
             return df_vehicle
 
         except Exception as e:
-
             print(e)
-
             logging.error(f"Erro ao processar tabela: {e}")
-
             return None
 
 
